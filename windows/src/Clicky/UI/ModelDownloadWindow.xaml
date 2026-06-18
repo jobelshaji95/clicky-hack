@@ -1,0 +1,49 @@
+<Window x:Class="Clicky.UI.ModelDownloadWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Clicky — First-run setup"
+        Width="420"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="True"
+        Topmost="True">
+
+    <Border Background="#171918"
+            BorderBrush="#373B39"
+            BorderThickness="1"
+            CornerRadius="14"
+            Padding="22">
+        <StackPanel>
+            <TextBlock Text="Setting up Clicky"
+                       Foreground="#ECEEED"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       FontFamily="Segoe UI" />
+            <TextBlock Text="Downloading the local vision model. This happens once — afterwards Clicky runs fully offline."
+                       Foreground="#ADB5B2"
+                       FontSize="13"
+                       Margin="0,6,0,0"
+                       TextWrapping="Wrap"
+                       FontFamily="Segoe UI" />
+
+            <ProgressBar x:Name="DownloadProgressBar"
+                         Height="10"
+                         Minimum="0"
+                         Maximum="1"
+                         Margin="0,18,0,0"
+                         Foreground="#3380FF"
+                         Background="#272A29" />
+
+            <TextBlock x:Name="ProgressDetail"
+                       Text="Starting…"
+                       Foreground="#6B736F"
+                       FontSize="12"
+                       Margin="0,8,0,0"
+                       FontFamily="Segoe UI" />
+        </StackPanel>
+    </Border>
+</Window>

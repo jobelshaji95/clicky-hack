@@ -1,0 +1,28 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Core palette ported from the macOS DesignSystem (DS.Colors). -->
+    <Color x:Key="BackgroundColor">#FF101211</Color>
+    <Color x:Key="Surface1Color">#FF171918</Color>
+    <Color x:Key="Surface2Color">#FF202221</Color>
+    <Color x:Key="Surface3Color">#FF272A29</Color>
+    <Color x:Key="BorderSubtleColor">#FF373B39</Color>
+    <Color x:Key="BorderStrongColor">#FF444947</Color>
+    <Color x:Key="TextPrimaryColor">#FFECEEED</Color>
+    <Color x:Key="TextSecondaryColor">#FFADB5B2</Color>
+    <Color x:Key="TextTertiaryColor">#FF6B736F</Color>
+    <Color x:Key="AccentColor">#FF2563EB</Color>
+    <Color x:Key="CursorBlueColor">#FF3380FF</Color>
+    <Color x:Key="DestructiveTextColor">#FFFF6369</Color>
+
+    <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}" />
+    <SolidColorBrush x:Key="Surface1Brush" Color="{StaticResource Surface1Color}" />
+    <SolidColorBrush x:Key="Surface2Brush" Color="{StaticResource Surface2Color}" />
+    <SolidColorBrush x:Key="Surface3Brush" Color="{StaticResource Surface3Color}" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="{StaticResource BorderSubtleColor}" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="{StaticResource BorderStrongColor}" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}" />
+    <SolidColorBrush x:Key="CursorBlueBrush" Color="{StaticResource CursorBlueColor}" />
+
+</ResourceDictionary>

@@ -1,0 +1,19 @@
+# .NET build output
+bin/
+obj/
+publish/
+
+# Installer staging + output
+stage/
+installer/output/
+
+# Downloaded engines and models (fetched by scripts/installer, never committed)
+**/tools/
+**/models/*.bin
+**/models/*.gguf
+**/models/*.onnx
+**/models/*.onnx.json
+
+# IDE
+.vs/
+*.user

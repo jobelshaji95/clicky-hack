@@ -1,0 +1,91 @@
+<Window x:Class="Clicky.UI.PanelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Clicky"
+        Width="320"
+        SizeToContent="Height"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True">
+
+    <!-- Dark, rounded floating panel — the Windows analog of the macOS NSPanel. -->
+    <Border Background="#171918"
+            BorderBrush="#373B39"
+            BorderThickness="1"
+            CornerRadius="14"
+            Padding="18">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" BlurRadius="24" ShadowDepth="0" Opacity="0.55" />
+        </Border.Effect>
+
+        <StackPanel>
+            <TextBlock Text="Clicky"
+                       Foreground="#ECEEED"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       FontFamily="Segoe UI" />
+
+            <TextBlock x:Name="StatusLine"
+                       Text="Starting up…"
+                       Foreground="#ADB5B2"
+                       FontSize="13"
+                       Margin="0,4,0,0"
+                       TextWrapping="Wrap"
+                       FontFamily="Segoe UI" />
+
+            <Border Background="#202221" CornerRadius="10" Padding="12" Margin="0,14,0,0">
+                <StackPanel>
+                    <TextBlock Text="Push to talk"
+                               Foreground="#ECEEED"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               FontFamily="Segoe UI" />
+                    <TextBlock Text="Hold Ctrl + Alt, speak, then release. Clicky sees your screen and answers out loud."
+                               Foreground="#ADB5B2"
+                               FontSize="12"
+                               Margin="0,4,0,0"
+                               TextWrapping="Wrap"
+                               FontFamily="Segoe UI" />
+                </StackPanel>
+            </Border>
+
+            <CheckBox x:Name="ShowCursorCheckBox"
+                      Content="Show the blue cursor"
+                      Foreground="#ECEEED"
+                      FontSize="13"
+                      Margin="2,14,0,0"
+                      FontFamily="Segoe UI"
+                      Checked="OnShowCursorChanged"
+                      Unchecked="OnShowCursorChanged" />
+
+            <Button x:Name="MicrophoneSettingsButton"
+                    Content="Microphone settings"
+                    Margin="0,14,0,0"
+                    Padding="10,7"
+                    HorizontalAlignment="Stretch"
+                    Background="#272A29"
+                    Foreground="#ECEEED"
+                    BorderBrush="#444947"
+                    BorderThickness="1"
+                    Cursor="Hand"
+                    FontFamily="Segoe UI"
+                    Click="OnMicrophoneSettingsClicked" />
+
+            <Button x:Name="QuitButton"
+                    Content="Quit Clicky"
+                    Margin="0,8,0,0"
+                    Padding="10,7"
+                    HorizontalAlignment="Stretch"
+                    Background="#272A29"
+                    Foreground="#FF6369"
+                    BorderBrush="#444947"
+                    BorderThickness="1"
+                    Cursor="Hand"
+                    FontFamily="Segoe UI"
+                    Click="OnQuitClicked" />
+        </StackPanel>
+    </Border>
+</Window>

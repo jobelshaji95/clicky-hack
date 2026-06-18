@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- WPF for the panel + cursor overlay; WinForms for Screen.AllScreens
+         (multi-monitor bounds) and the tray-friendly System.Drawing types. -->
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+
+    <!-- Single, self-contained x64 build so the installer has no .NET prerequisite. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <SelfContained>true</SelfContained>
+
+    <AssemblyName>Clicky</AssemblyName>
+    <RootNamespace>Clicky</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Drop in Assets\clicky.ico and re-add <ApplicationIcon> to brand the exe/tray;
+         the tray falls back to the system icon when the file is absent. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- System tray icon + WPF-hosted context menu / popups. -->
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
+    <!-- Microphone capture (WASAPI / WaveIn) and WAV playback for TTS. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Local Whisper speech-to-text (whisper.cpp bindings, no Python). -->
+    <PackageReference Include="Whisper.net" Version="1.7.3" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.7.3" />
+    <!-- Configuration binding for appsettings.json. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- appsettings.json travels next to the executable. -->
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

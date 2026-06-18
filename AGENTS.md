@@ -9,6 +9,13 @@ macOS menu bar companion app. Lives entirely in the macOS status bar (no dock ic
 
 All API keys live on a Cloudflare Worker proxy — nothing sensitive ships in the app.
 
+> **Windows port**: A separate, fully-offline Windows port lives under `windows/`
+> (.NET 8 / C# WPF + Win32). It replaces the cloud AI with local engines — Whisper
+> (STT), llama.cpp + Qwen2.5-VL (vision LLM), and Piper (TTS) — and ships as a single
+> Inno Setup installer. It reuses the system prompt and `[POINT:...]` tag contract
+> but is otherwise an independent codebase. See `windows/README.md`. The macOS app
+> described below is unaffected.
+
 ## Architecture
 
 - **App Type**: Menu bar-only (`LSUIElement=true`), no dock icon or main window
