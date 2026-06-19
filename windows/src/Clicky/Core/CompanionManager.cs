@@ -56,6 +56,7 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         _visionLlm = new LocalVisionLlmClient(config.VisionLlm);
 
         IsCursorEnabled = config.Overlay.ShowCursorByDefault;
+        EngineSummary = $"{config.VisionLlm.ModelName} · whisper · 100% local";
 
         // The screen capture service hides overlays so they aren't in the shot.
         _screenCapture.HideOverlayBeforeCapture = () => _overlayManager.HideForCaptureAsync();
@@ -105,6 +106,9 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
     }
 
     public string? LastTranscript { get; private set; }
+
+    /// <summary>Short description of the local engines, shown in the panel footer.</summary>
+    public string EngineSummary { get; }
 
     // ── Lifecycle ───────────────────────────────────────────────────────
 

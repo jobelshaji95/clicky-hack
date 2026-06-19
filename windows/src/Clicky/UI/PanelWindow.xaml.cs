@@ -22,6 +22,7 @@ public partial class PanelWindow : Window
 
         ShowCursorCheckBox.IsChecked = _companionManager.IsCursorEnabled;
         StatusLine.Text = _companionManager.StatusText;
+        EngineInfoLine.Text = _companionManager.EngineSummary;
         RefreshVoiceState();
 
         _companionManager.PropertyChanged += OnCompanionPropertyChanged;
@@ -81,6 +82,22 @@ public partial class PanelWindow : Window
 
     private void OnMicrophoneSettingsClicked(object sender, RoutedEventArgs args) =>
         _companionManager.OpenMicrophoneSettings();
+
+    private void OnReportIssueClicked(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "https://github.com/jobelshaji95/clicky-hack/issues",
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // Opening the browser should never crash the panel.
+        }
+    }
 
     private void OnQuitClicked(object sender, RoutedEventArgs args) =>
         Application.Current.Shutdown();

@@ -108,6 +108,19 @@
                     FontFamily="Segoe UI"
                     Click="OnMicrophoneSettingsClicked" />
 
+            <Button x:Name="ReportIssueButton"
+                    Content="Report an issue on GitHub"
+                    Margin="0,8,0,0"
+                    Padding="10,7"
+                    HorizontalAlignment="Stretch"
+                    Background="#272A29"
+                    Foreground="#ECEEED"
+                    BorderBrush="#444947"
+                    BorderThickness="1"
+                    Cursor="Hand"
+                    FontFamily="Segoe UI"
+                    Click="OnReportIssueClicked" />
+
             <Button x:Name="QuitButton"
                     Content="Quit Clicky"
                     Margin="0,8,0,0"
@@ -120,6 +133,13 @@
                     Cursor="Hand"
                     FontFamily="Segoe UI"
                     Click="OnQuitClicked" />
+
+            <TextBlock x:Name="EngineInfoLine"
+                       Text=""
+                       Margin="2,12,0,0"
+                       Foreground="#6B736F"
+                       FontSize="11"
+                       FontFamily="Consolas" />
         </StackPanel>
     </Border>
 </Window>
