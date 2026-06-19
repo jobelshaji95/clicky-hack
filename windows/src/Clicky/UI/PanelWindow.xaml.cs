@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Media;
 using Clicky.Core;
 
 namespace Clicky.UI;
@@ -21,6 +22,7 @@ public partial class PanelWindow : Window
 
         ShowCursorCheckBox.IsChecked = _companionManager.IsCursorEnabled;
         StatusLine.Text = _companionManager.StatusText;
+        RefreshVoiceState();
 
         _companionManager.PropertyChanged += OnCompanionPropertyChanged;
         Deactivated += (_, _) => Hide();
@@ -32,6 +34,29 @@ public partial class PanelWindow : Window
         {
             Dispatcher.Invoke(() => StatusLine.Text = _companionManager.StatusText);
         }
+        else if (args.PropertyName == nameof(CompanionManager.VoiceState))
+        {
+            Dispatcher.Invoke(RefreshVoiceState);
+        }
+    }
+
+    /// <summary>Mirrors the live voice state into the header's status dot + label.</summary>
+    private void RefreshVoiceState()
+    {
+        var (hexColor, label) = _companionManager.VoiceState switch
+        {
+            CompanionVoiceState.Listening => ("#60A5FA", "Listening"),
+            CompanionVoiceState.Processing => ("#60A5FA", "Thinking"),
+            CompanionVoiceState.Responding => ("#3380FF", "Responding"),
+            _ => ("#34D399", "Active"),
+        };
+
+        var stateColor = (Color)System.Windows.Media.ColorConverter.ConvertFromString(hexColor);
+        StatusDot.Fill = new SolidColorBrush(stateColor);
+        StatusDotGlow.Color = stateColor;
+        StatusDotGlow.Opacity = 0.75;
+        StateText.Text = label;
+        StateText.Foreground = new SolidColorBrush(stateColor);
     }
 
     /// <summary>Positions the panel near the tray (bottom-right of the primary work area) and shows it.</summary>
