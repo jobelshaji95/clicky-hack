@@ -95,18 +95,40 @@
                       Checked="OnShowCursorChanged"
                       Unchecked="OnShowCursorChanged" />
 
-            <Button x:Name="MicrophoneSettingsButton"
-                    Content="Microphone settings"
-                    Margin="0,14,0,0"
-                    Padding="10,7"
-                    HorizontalAlignment="Stretch"
-                    Background="#272A29"
-                    Foreground="#ECEEED"
-                    BorderBrush="#444947"
-                    BorderThickness="1"
-                    Cursor="Hand"
-                    FontFamily="Segoe UI"
-                    Click="OnMicrophoneSettingsClicked" />
+            <Border Background="#202221" CornerRadius="10" Padding="12" Margin="0,14,0,0">
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="MicStatusDot" Width="8" Height="8" VerticalAlignment="Center" Fill="#6B736F" />
+                        <TextBlock Text="Microphone"
+                                   Margin="8,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="#ECEEED"
+                                   FontSize="13"
+                                   FontFamily="Segoe UI" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <TextBlock x:Name="MicStatusText"
+                                   Text="…"
+                                   VerticalAlignment="Center"
+                                   Foreground="#6B736F"
+                                   FontSize="11.5"
+                                   FontFamily="Consolas" />
+                        <Button x:Name="MicSettingsButton"
+                                Content="Settings"
+                                Margin="10,0,0,0"
+                                Padding="9,3"
+                                Background="#272A29"
+                                Foreground="#ECEEED"
+                                BorderBrush="#444947"
+                                BorderThickness="1"
+                                Cursor="Hand"
+                                FontSize="11.5"
+                                FontFamily="Segoe UI"
+                                Click="OnMicrophoneSettingsClicked" />
+                    </StackPanel>
+                </Grid>
+            </Border>
 
             <Button x:Name="ReportIssueButton"
                     Content="Report an issue on GitHub"

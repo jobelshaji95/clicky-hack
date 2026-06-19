@@ -110,6 +110,9 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
     /// <summary>Short description of the local engines, shown in the panel footer.</summary>
     public string EngineSummary { get; }
 
+    /// <summary>True when a usable microphone is present (the one Windows permission that matters).</summary>
+    public bool HasMicrophone => _permissionService.HasMicrophone();
+
     // ── Lifecycle ───────────────────────────────────────────────────────
 
     public void Start()

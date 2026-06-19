@@ -24,6 +24,7 @@ public partial class PanelWindow : Window
         StatusLine.Text = _companionManager.StatusText;
         EngineInfoLine.Text = _companionManager.EngineSummary;
         RefreshVoiceState();
+        RefreshMicrophoneStatus();
 
         _companionManager.PropertyChanged += OnCompanionPropertyChanged;
         Deactivated += (_, _) => Hide();
@@ -60,12 +61,30 @@ public partial class PanelWindow : Window
         StateText.Foreground = new SolidColorBrush(stateColor);
     }
 
+    /// <summary>Shows whether a microphone is detected; offers Settings when it isn't.</summary>
+    private void RefreshMicrophoneStatus()
+    {
+        var hasMicrophone = _companionManager.HasMicrophone;
+        var hex = hasMicrophone ? "#34D399" : "#FFB224"; // success green / warning amber
+        var color = (Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+
+        MicStatusDot.Fill = new SolidColorBrush(color);
+        MicStatusText.Text = hasMicrophone ? "Detected" : "Not detected";
+        MicStatusText.Foreground = new SolidColorBrush(color);
+        // The Settings shortcut only matters when there's a problem to fix.
+        MicSettingsButton.Visibility = hasMicrophone ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     /// <summary>Positions the panel near the tray (bottom-right of the primary work area) and shows it.</summary>
     public void ShowNearTray()
     {
         var workArea = SystemParameters.WorkArea;
 
         // Measure first so we can anchor the bottom-right corner just above the tray.
+        // Re-check the mic each time the panel opens — devices can be plugged in
+        // or permission changed while the app is running.
+        RefreshMicrophoneStatus();
+
         Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         Left = workArea.Right - Width - 12;
         Top = workArea.Bottom - ActualHeight - 12;
