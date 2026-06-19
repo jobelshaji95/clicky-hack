@@ -28,6 +28,11 @@ public sealed class LlamaServerProcess : IDisposable
     /// <summary>Starts the server (if managed) and waits until /health reports ready.</summary>
     public async Task StartAndWaitUntilReadyAsync(CancellationToken cancellationToken = default)
     {
+        if (await IsHealthyAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (_config.ManageServerProcess)
         {
             StartServerProcess();
@@ -61,6 +66,7 @@ public sealed class LlamaServerProcess : IDisposable
         var startInfo = new ProcessStartInfo
         {
             FileName = executablePath,
+            WorkingDirectory = Path.GetDirectoryName(executablePath),
             UseShellExecute = false,
             CreateNoWindow = true
             // Intentionally do NOT redirect stdout/stderr: this is a long-running
@@ -101,17 +107,9 @@ public sealed class LlamaServerProcess : IDisposable
                 throw new InvalidOperationException("llama-server exited before becoming ready.");
             }
 
-            try
+            if (await IsHealthyAsync(cancellationToken).ConfigureAwait(false))
             {
-                using var response = await _healthClient.GetAsync(_config.HealthUrl, cancellationToken).ConfigureAwait(false);
-                if (response.IsSuccessStatusCode)
-                {
-                    return;
-                }
-            }
-            catch
-            {
-                // Not up yet — keep polling.
+                return;
             }
 
             await Task.Delay(750, cancellationToken).ConfigureAwait(false);
@@ -120,6 +118,18 @@ public sealed class LlamaServerProcess : IDisposable
         throw new TimeoutException("llama-server did not become healthy in time.");
     }
 
+    private async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _healthClient.GetAsync(_config.HealthUrl, cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
     public void Dispose()
     {
         _healthClient.Dispose();

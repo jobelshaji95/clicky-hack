@@ -21,6 +21,23 @@ public sealed class AppConfig
     public static string ApplicationDirectory =>
         AppContext.BaseDirectory;
 
+    /// <summary>
+    /// Writable per-user data directory (logs, interaction history). Lives under
+    /// %LOCALAPPDATA%\Clicky so it works even when the app is installed read-only
+    /// under Program Files. Created on first access.
+    /// </summary>
+    public static string UserDataDirectory
+    {
+        get
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Clicky");
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+    }
+
     public static AppConfig Load()
     {
         var configurationRoot = new ConfigurationBuilder()

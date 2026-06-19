@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -49,11 +50,15 @@ public sealed class TrayIconManager : IDisposable
         var openItem = new MenuItem { Header = "Open Clicky" };
         openItem.Click += (_, _) => TogglePanel();
 
+        var openLogsItem = new MenuItem { Header = "Open Logs & History…" };
+        openLogsItem.Click += (_, _) => OpenDiagnosticsFolder();
+
         var quitItem = new MenuItem { Header = "Quit Clicky" };
         quitItem.Click += (_, _) => Application.Current.Shutdown();
 
         var menu = new ContextMenu();
         menu.Items.Add(openItem);
+        menu.Items.Add(openLogsItem);
         menu.Items.Add(new Separator());
         menu.Items.Add(quitItem);
         return menu;
@@ -70,6 +75,23 @@ public sealed class TrayIconManager : IDisposable
         else
         {
             _panelWindow.ShowNearTray();
+        }
+    }
+
+    /// <summary>Opens the per-user data folder (logs + interaction history) in Explorer.</summary>
+    private static void OpenDiagnosticsFolder()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = AppConfig.UserDataDirectory,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // Best-effort — opening Explorer should never crash the tray.
         }
     }
 

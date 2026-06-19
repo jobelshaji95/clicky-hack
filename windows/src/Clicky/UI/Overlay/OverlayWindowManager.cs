@@ -103,8 +103,7 @@ public sealed class OverlayWindowManager
     public void UpdateCompanionState(
         CompanionVoiceState voiceState,
         double audioPowerLevel,
-        bool cursorVisible,
-        string? responseBubbleText)
+        bool cursorVisible)
     {
         _uiDispatcher.Invoke(() =>
         {
@@ -112,7 +111,35 @@ public sealed class OverlayWindowManager
             {
                 // Each window self-gates on whether the cursor is on its monitor,
                 // so passing isActiveMonitor: true is correct for all of them.
-                window.SetCompanionState(voiceState, audioPowerLevel, isActiveMonitor: true, cursorVisible, responseBubbleText);
+                window.SetCompanionState(voiceState, audioPowerLevel, isActiveMonitor: true, cursorVisible);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Reveals/updates the streaming response card text on the monitor under the cursor.
+    /// Called rapidly while tokens arrive, so it posts asynchronously to avoid blocking
+    /// the streaming thread on the UI thread.
+    /// </summary>
+    public void UpdateResponse(string text, bool isStreaming)
+    {
+        _uiDispatcher.BeginInvoke(() =>
+        {
+            foreach (var window in _overlayWindows)
+            {
+                window.SetResponseCard(text, isStreaming);
+            }
+        });
+    }
+
+    /// <summary>Dismisses the response card on every monitor.</summary>
+    public void HideResponse()
+    {
+        _uiDispatcher.BeginInvoke(() =>
+        {
+            foreach (var window in _overlayWindows)
+            {
+                window.SetResponseCard(null, isStreaming: false);
             }
         });
     }

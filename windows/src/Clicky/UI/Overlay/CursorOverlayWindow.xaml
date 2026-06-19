@@ -9,21 +9,38 @@
         ShowInTaskbar="False"
         Topmost="True"
         IsHitTestVisible="False"
-        Focusable="False">
+        Focusable="False"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Ideal"
+        RenderOptions.BitmapScalingMode="HighQuality">
 
     <!-- A single absolute-positioned canvas hosts every overlay visual. Elements
          are shown/hidden and repositioned from code-behind on the render loop. -->
     <Canvas x:Name="RootCanvas">
 
-        <!-- Blue triangle cursor (idle / responding / flight). RenderTransform is
-             set in code so the tip rotates to face its direction of travel. -->
+        <!-- Blue companion — a clean, slightly small equilateral triangle in the
+             spirit of the Vercel mark. A subtle vertical gradient gives it depth;
+             the outer glow + thin light edge make it read crisply on any background.
+             RenderTransform is set in code so the tip rotates to face its direction
+             of travel (default -35°, same as before). -->
         <Polygon x:Name="TriangleShape"
-                 Points="10,0 20,28 0,28"
-                 Fill="#3380FF"
+                 Points="8,0 16,14 0,14"
                  Visibility="Collapsed"
+                 StrokeThickness="0.75"
+                 StrokeLineJoin="Round"
                  RenderTransformOrigin="0.5,0.5">
+            <Polygon.Fill>
+                <LinearGradientBrush StartPoint="0.15,0" EndPoint="0.7,1">
+                    <GradientStop Color="#6BA8FF" Offset="0" />
+                    <GradientStop Color="#3380FF" Offset="0.55" />
+                    <GradientStop Color="#1E6BF0" Offset="1" />
+                </LinearGradientBrush>
+            </Polygon.Fill>
+            <Polygon.Stroke>
+                <SolidColorBrush Color="#FFFFFF" Opacity="0.45" />
+            </Polygon.Stroke>
             <Polygon.Effect>
-                <DropShadowEffect x:Name="TriangleGlow" Color="#3380FF" BlurRadius="8" ShadowDepth="0" Opacity="0.9" />
+                <DropShadowEffect x:Name="TriangleGlow" Color="#3380FF" BlurRadius="10" ShadowDepth="0" Opacity="0.85" />
             </Polygon.Effect>
             <Polygon.RenderTransform>
                 <TransformGroup>
@@ -45,28 +62,122 @@
               StrokeEndLineCap="Round"
               Data="M 12,0 A 12,12 0 1 1 0,12"
               RenderTransformOrigin="0.5,0.5">
+            <Path.Effect>
+                <DropShadowEffect Color="#3380FF" BlurRadius="6" ShadowDepth="0" Opacity="0.6" />
+            </Path.Effect>
             <Path.RenderTransform>
                 <RotateTransform x:Name="SpinnerRotation" Angle="0" />
             </Path.RenderTransform>
         </Path>
 
-        <!-- Response / pointing speech bubble, shown next to the cursor. -->
+        <!-- One-time welcome pill — streams "hey, i'm clicky" on first appearance. -->
+        <Border x:Name="WelcomeBubble"
+                Visibility="Collapsed"
+                CornerRadius="8"
+                Padding="10,5"
+                Opacity="0">
+            <Border.Background>
+                <SolidColorBrush Color="#3380FF" />
+            </Border.Background>
+            <Border.Effect>
+                <DropShadowEffect Color="#3380FF" BlurRadius="14" ShadowDepth="0" Opacity="0.55" />
+            </Border.Effect>
+            <TextBlock x:Name="WelcomeText"
+                       Foreground="White"
+                       FontFamily="Segoe UI"
+                       FontSize="12.5"
+                       FontWeight="SemiBold" />
+        </Border>
+
+        <!-- Small pointing label shown while the cursor flies to an element. -->
         <Border x:Name="BubbleBorder"
                 Visibility="Collapsed"
-                Background="#171918"
-                BorderBrush="#373B39"
-                BorderThickness="1"
-                CornerRadius="10"
-                Padding="12,8"
-                MaxWidth="320">
+                Background="#3380FF"
+                CornerRadius="8"
+                Padding="10,5">
             <Border.Effect>
-                <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="0" Opacity="0.5" />
+                <DropShadowEffect Color="#3380FF" BlurRadius="14" ShadowDepth="0" Opacity="0.5" />
             </Border.Effect>
             <TextBlock x:Name="BubbleText"
-                       Foreground="#ECEEED"
-                       FontSize="14"
+                       Foreground="White"
+                       FontFamily="Segoe UI"
+                       FontSize="12.5"
+                       FontWeight="SemiBold"
                        TextWrapping="Wrap"
-                       FontFamily="Segoe UI" />
+                       MaxWidth="240" />
+        </Border>
+
+        <!-- ── Series-A response card ───────────────────────────────────────
+             A refined dark glass card that reveals the AI's answer as it streams.
+             Header: a softly-glowing blue status dot + a monospaced "clicky"
+             wordmark. Body: the streaming answer with a blinking caret. -->
+        <Border x:Name="ResponseCard"
+                Visibility="Collapsed"
+                MaxWidth="360"
+                CornerRadius="14"
+                Opacity="0"
+                Padding="0">
+            <Border.Background>
+                <SolidColorBrush Color="#171918" Opacity="0.97" />
+            </Border.Background>
+            <Border.BorderBrush>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="#FFFFFF" Offset="0" />
+                    <GradientStop Color="#3380FF" Offset="0.5" />
+                    <GradientStop Color="#000000" Offset="1" />
+                </LinearGradientBrush>
+            </Border.BorderBrush>
+            <Border.BorderThickness>1</Border.BorderThickness>
+            <Border.Effect>
+                <DropShadowEffect Color="#000000" BlurRadius="28" ShadowDepth="10" Opacity="0.55" Direction="270" />
+            </Border.Effect>
+
+            <StackPanel Margin="16,13,16,14">
+                <!-- Header row -->
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="7" Height="7" VerticalAlignment="Center">
+                        <Ellipse.Fill>
+                            <SolidColorBrush Color="#3380FF" />
+                        </Ellipse.Fill>
+                        <Ellipse.Effect>
+                            <DropShadowEffect Color="#3380FF" BlurRadius="9" ShadowDepth="0" Opacity="0.95" />
+                        </Ellipse.Effect>
+                    </Ellipse>
+                    <TextBlock Text="clicky"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               FontFamily="Consolas"
+                               FontSize="11.5"
+                               Foreground="#8FB8FF" />
+                    <TextBlock Text="·  thinking aloud"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               FontFamily="Consolas"
+                               FontSize="11"
+                               Foreground="#6B736F" />
+                </StackPanel>
+
+                <!-- Hairline divider -->
+                <Rectangle Height="1" Margin="0,10,0,10" SnapsToDevicePixels="True">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="#3380FF" Offset="0" />
+                            <GradientStop Color="#26373B39" Offset="0.6" />
+                            <GradientStop Color="#00000000" Offset="1" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <!-- Streaming answer + caret -->
+                <TextBlock x:Name="ResponseBody"
+                           TextWrapping="Wrap"
+                           MaxWidth="328"
+                           Foreground="#ECEEED"
+                           FontFamily="Segoe UI"
+                           FontSize="14"
+                           LineHeight="20"
+                           LineStackingStrategy="BlockLineHeight"><Run x:Name="ResponseBodyRun" /><Run x:Name="ResponseCaretRun" Text="▍" Foreground="#3380FF" /></TextBlock>
+            </StackPanel>
         </Border>
     </Canvas>
 </Window>

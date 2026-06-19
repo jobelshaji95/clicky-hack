@@ -3,8 +3,11 @@
 A native Windows port of Clicky — the menu-bar voice companion — rebuilt in
 **.NET 8 / C# (WPF + Win32)** and running **completely locally**: no Cloudflare
 Worker, no API keys, no internet for inference. Hold **Ctrl + Alt**, speak,
-release; Clicky sees your screen, answers out loud, and a blue cursor flies to
-the thing it's talking about.
+release; Clicky sees your screen, **streams its answer into an on-screen card**,
+and a blue cursor flies to the thing it's talking about.
+
+> **Audio output is disabled.** The companion *shows* its answer in a polished
+> response card rather than speaking it — there is no text-to-speech playback.
 
 ## How it maps to the macOS app
 
@@ -17,7 +20,7 @@ the thing it's talking about.
 | Mic capture | AVAudioEngine | `MicrophoneCaptureService` (NAudio, 16 kHz mono PCM16) |
 | Speech-to-text | AssemblyAI (cloud) | `WhisperLocalTranscriptionProvider` (whisper.cpp, **local**) |
 | Vision LLM | Claude via proxy (cloud) | `LocalVisionLlmClient` → llama.cpp server + Qwen2.5-VL (**local**) |
-| Text-to-speech | ElevenLabs (cloud) | `PiperTtsClient` (Piper, **local**) |
+| Response | ElevenLabs voice (cloud) | streamed **on-screen response card** (audio output removed) |
 | Pointing math | `parsePointingCoordinates` + AppKit Y-flip | `PointTagParser` + `CoordinateMapper` (top-left origin) |
 
 The system prompt and the `[POINT:x,y:label:screenN]` tag contract are ported
@@ -27,9 +30,11 @@ verbatim (`Ai/SystemPrompts.cs`, `Core/PointTagParser.cs`) so behavior matches.
 
 | Stage | Engine | Where it lives |
 |-------|--------|----------------|
-| STT | whisper.cpp via Whisper.net | `models\ggml-base.en.bin` (ships in installer) |
-| LLM | llama.cpp `llama-server.exe` + Qwen2.5-VL GGUF | server in `tools\`, model in `models\` (downloaded on first run) |
-| TTS | Piper + ONNX voice | `tools\piper\piper.exe`, `models\en_US-amy-medium.onnx` (ships in installer) |
+| STT | whisper.cpp via Whisper.net | `models\ggml-base.en.bin` (fetched by `fetch-runtime.ps1`) |
+| LLM | llama.cpp `llama-server.exe` (Vulkan GPU build) + Qwen2.5-VL GGUF | server in `tools\`, model in `models\` |
+
+> Piper TTS files are still fetched for completeness, but audio playback is
+> disabled in the app — the answer is shown, not spoken.
 
 The app launches and owns the llama.cpp server on `127.0.0.1:8080` and shuts it
 down on exit, so there's no separate service to manage. All paths/ports live in
@@ -40,18 +45,36 @@ down on exit, so there's no separate service to manage. All paths/ports live in
 ```powershell
 # From windows\
 dotnet restore Clicky.sln
-dotnet build  Clicky.sln -c Debug
+dotnet build  Clicky.sln -c Release
 
-# Fetch the offline engines + small models into a staging dir, then copy
-# stage\tools and stage\models next to the build output (bin\...\net8.0-windows...\).
-powershell -ExecutionPolicy Bypass -File scripts\fetch-runtime.ps1
+# Fetch ALL offline engines + small models into a staging dir — fully automated,
+# no manual unzip steps (llama.cpp Vulkan server, Piper, Whisper + voice models).
+# Add -IncludeVisionModel to also pull the ~6 GB Qwen2.5-VL GGUF now instead of
+# on first run.
+powershell -ExecutionPolicy Bypass -File scripts\fetch-runtime.ps1   # [-IncludeVisionModel]
 
-# Run. On first launch it downloads the vision model (~4-5 GB) with a progress UI.
-dotnet run --project src\Clicky\Clicky.csproj
+# Copy the staged engines/models next to the build output, then run.
+$out = "src\Clicky\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64"
+Copy-Item stage\tools  $out -Recurse -Force
+Copy-Item stage\models $out -Recurse -Force
+& "$out\Clicky.exe"
+# (On first launch, if the vision model isn't present, it's downloaded with a progress UI.)
 ```
 
 > Requires Windows 10/11 x64, a microphone, and (recommended) a GPU for snappy
-> vision inference. CPU works but is slower.
+> vision inference. The bundled llama.cpp is a **Vulkan** build, so it accelerates
+> on any modern NVIDIA/AMD/Intel GPU without a CUDA toolkit. CPU works but is slower.
+
+## Logs & history (debugging)
+
+Everything is written under `%LOCALAPPDATA%\Clicky` (open it from the tray menu →
+**Open Logs & History…**):
+
+- `logs\clicky-<date>.log` — timestamped session log: model startup, hotkey events,
+  per-stage timings, and errors.
+- `history\interactions.jsonl` — one JSON line per push-to-talk turn: transcript,
+  response, whether/where it pointed, and transcription/vision/total timings. Greppable
+  for tuning and bug reports.
 
 ## Build the installer
 
@@ -85,6 +108,8 @@ recommended balance.
 - **Pointing accuracy** depends on the local vision model's visual grounding.
   Qwen2.5-VL is the strongest open option; expect it to be less pinpoint than
   cloud Claude. Swap models via `appsettings.json` → `VisionLlm`.
-- **Dropped from v1**: PostHog analytics and Sparkle auto-update (the macoS app's
-  cloud-tied extras). The onboarding video/music flow is also omitted.
+- **Dropped from v1**: PostHog analytics and Sparkle auto-update (the macOS app's
+  cloud-tied extras). The onboarding video/music flow is also omitted. **Audio output
+  (Piper TTS playback) is intentionally disabled** — responses are shown in the
+  on-screen card instead.
 - WPF/Win32 are Windows-only; this project does not build on macOS or Linux.

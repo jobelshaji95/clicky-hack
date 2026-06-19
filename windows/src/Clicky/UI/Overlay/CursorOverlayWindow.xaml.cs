@@ -11,12 +11,15 @@ namespace Clicky.UI.Overlay;
 
 /// <summary>
 /// One transparent, click-through, always-on-top window covering a single monitor.
-/// Renders the blue triangle companion, the listening waveform, the processing
-/// spinner, and the response bubble — the Windows port of the macOS OverlayWindow /
-/// BlueCursorView. All visuals live on a 16 ms render loop.
+/// Renders the blue arrow companion, the listening waveform, the processing spinner,
+/// and the streaming response card — the Windows port of the macOS OverlayWindow /
+/// BlueCursorView. All visuals live on a ~60fps render loop.
 ///
-/// The window is positioned and sized in device-independent pixels (DIPs); the
-/// monitor's device-pixel bounds are divided by its DPI scale so it lines up exactly.
+/// The companion follows the cursor with a spring (damped, slightly trailing) for a
+/// fluid feel, sits a little below-right of the pointer, and fades in gracefully on
+/// first appearance. The window is positioned/sized in device-independent pixels
+/// (DIPs); the monitor's device-pixel bounds are divided by its DPI scale so it lines
+/// up exactly.
 /// </summary>
 public partial class CursorOverlayWindow : Window
 {
@@ -28,12 +31,50 @@ public partial class CursorOverlayWindow : Window
     private readonly Polygon[] _waveformBars;
     private const int WaveformBarCount = 5;
 
+    // How far below-right of the actual pointer the companion sits (DIPs). This gap
+    // is the "spacing" that keeps the arrow from covering whatever it points at.
+    private const double FollowOffsetX = 14;
+    private const double FollowOffsetY = 17;
+
+    // Spring tuning for the follow motion. Response is the rough time to settle;
+    // a damping below 1.0 gives a touch of lively trailing without wobble.
+    private const double SpringResponseSeconds = 0.20;
+    private const double SpringDampingFraction = 0.65;
+
     // Companion state pushed in by the manager.
     private CompanionVoiceState _voiceState = CompanionVoiceState.Idle;
     private double _audioPowerLevel;
     private bool _isActiveMonitor;
     private bool _cursorVisible = true;
-    private string? _responseBubbleText;
+
+    // Smoothed follow position + velocity for the spring integrator.
+    private Point _followPosition;
+    private Vector _followVelocity;
+    private bool _followInitialized;
+
+    // Graceful fade-in the first time the companion becomes visible on this monitor.
+    private double _entranceProgress;
+    private const double EntranceDurationSeconds = 1.1;
+
+    // ── Streaming response card ──────────────────────────────────────────
+    private string? _responseText;
+    private bool _responseStreaming;
+    private double _responseCardOpacity;
+    private double _responseCardOpacityTarget;
+
+    // Caret blink.
+    private DateTime _lastCaretToggle = DateTime.UtcNow;
+    private bool _caretOn = true;
+
+    // ── One-time welcome ─────────────────────────────────────────────────
+    private static bool _welcomeConsumed;
+    private enum WelcomePhase { Pending, Revealing, Holding, FadingOut, Done }
+    private WelcomePhase _welcomePhase = WelcomePhase.Pending;
+    private const string WelcomeMessage = "hey, i'm clicky";
+    private int _welcomeRevealedCharacters;
+    private DateTime _welcomeNextCharacterTime;
+    private DateTime _welcomeHoldUntil;
+    private double _welcomeOpacity;
 
     // Bezier flight state.
     private bool _isFlying;
@@ -97,10 +138,17 @@ public partial class CursorOverlayWindow : Window
         {
             var bar = new Polygon
             {
-                Points = new PointCollection { new(0, 0), new(6, 0), new(6, 30), new(0, 30) },
-                Fill = new SolidColorBrush(Color.FromRgb(0x33, 0x80, 0xFF))
+                Points = new PointCollection { new(0, 0), new(4, 0), new(4, 30), new(0, 30) },
+                Fill = new SolidColorBrush(Color.FromRgb(0x33, 0x80, 0xFF)),
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    Color = Color.FromRgb(0x33, 0x80, 0xFF),
+                    BlurRadius = 6,
+                    ShadowDepth = 0,
+                    Opacity = 0.6
+                }
             };
-            Canvas.SetLeft(bar, barIndex * 10);
+            Canvas.SetLeft(bar, barIndex * 8);
             WaveformCanvas.Children.Add(bar);
             bars[barIndex] = bar;
         }
@@ -114,14 +162,24 @@ public partial class CursorOverlayWindow : Window
         CompanionVoiceState voiceState,
         double audioPowerLevel,
         bool isActiveMonitor,
-        bool cursorVisible,
-        string? responseBubbleText)
+        bool cursorVisible)
     {
         _voiceState = voiceState;
         _audioPowerLevel = audioPowerLevel;
         _isActiveMonitor = isActiveMonitor;
         _cursorVisible = cursorVisible;
-        _responseBubbleText = responseBubbleText;
+    }
+
+    /// <summary>
+    /// Sets (or clears) the streaming response card text. <paramref name="isStreaming"/>
+    /// keeps the blinking caret alive while tokens are still arriving. Passing null text
+    /// dismisses the card with a fade-out.
+    /// </summary>
+    public void SetResponseCard(string? text, bool isStreaming)
+    {
+        _responseText = text;
+        _responseStreaming = isStreaming;
+        _responseCardOpacityTarget = string.IsNullOrEmpty(text) ? 0.0 : 1.0;
     }
 
     /// <summary>Begins a bezier flight from the current triangle position to a local DIP target.</summary>
@@ -152,6 +210,12 @@ public partial class CursorOverlayWindow : Window
 
     private void OnRenderTick(object? sender, EventArgs eventArgs)
     {
+        var cursorOnThisMonitor = TryGetCursorLocalPoint(out var cursorRaw);
+
+        // The response card and welcome pill track the actual pointer independently of
+        // the companion's spring, so they stay glued to the cursor in every state.
+        UpdateResponseCard(cursorOnThisMonitor, cursorRaw);
+
         if (_isFlying)
         {
             RenderFlight();
@@ -161,18 +225,73 @@ public partial class CursorOverlayWindow : Window
         // Spinner always advances when visible.
         SpinnerRotation.Angle = (SpinnerRotation.Angle + 9) % 360;
 
-        var cursorOnThisMonitor = TryGetCursorLocalPoint(out var cursorLocal);
         var shouldShowCompanion = _cursorVisible && _isActiveMonitor && cursorOnThisMonitor;
+
+        UpdateEntranceOpacity(shouldShowCompanion);
+        UpdateWelcome(shouldShowCompanion, cursorRaw);
 
         if (!shouldShowCompanion)
         {
-            HideAllVisuals();
+            HideCompanionVisuals();
             return;
         }
 
-        _lastTrianglePosition = cursorLocal;
-        PositionFollowingVisualsAt(cursorLocal);
+        // Spring the companion toward a point just below-right of the pointer.
+        var followTarget = new Point(cursorRaw.X + FollowOffsetX, cursorRaw.Y + FollowOffsetY);
+        StepFollowSpring(followTarget);
+
+        _lastTrianglePosition = _followPosition;
+        PositionFollowingVisualsAt(_followPosition);
     }
+
+    /// <summary>Damped-spring integrator that eases the companion toward the pointer.</summary>
+    private void StepFollowSpring(Point target)
+    {
+        if (!_followInitialized)
+        {
+            _followPosition = target;
+            _followVelocity = new Vector(0, 0);
+            _followInitialized = true;
+            return;
+        }
+
+        // Critically-shaped spring: omega from the response time, damping below 1.
+        var angularFrequency = 2.0 * Math.PI / SpringResponseSeconds;
+        var stiffness = angularFrequency * angularFrequency;
+        var damping = 2.0 * SpringDampingFraction * angularFrequency;
+
+        // Sub-step for stability at a stiff response.
+        const int subSteps = 2;
+        var stepSeconds = 0.016 / subSteps;
+        for (var step = 0; step < subSteps; step++)
+        {
+            var accelerationX = -stiffness * (_followPosition.X - target.X) - damping * _followVelocity.X;
+            var accelerationY = -stiffness * (_followPosition.Y - target.Y) - damping * _followVelocity.Y;
+            _followVelocity = new Vector(
+                _followVelocity.X + accelerationX * stepSeconds,
+                _followVelocity.Y + accelerationY * stepSeconds);
+            _followPosition = new Point(
+                _followPosition.X + _followVelocity.X * stepSeconds,
+                _followPosition.Y + _followVelocity.Y * stepSeconds);
+        }
+    }
+
+    private void UpdateEntranceOpacity(bool shouldShowCompanion)
+    {
+        if (!shouldShowCompanion)
+        {
+            return;
+        }
+
+        if (_entranceProgress < 1.0)
+        {
+            _entranceProgress = Math.Min(1.0, _entranceProgress + 0.016 / EntranceDurationSeconds);
+        }
+    }
+
+    /// <summary>Smoothstep eased entrance opacity (0→1).</summary>
+    private double EntranceOpacity =>
+        _entranceProgress * _entranceProgress * (3.0 - 2.0 * _entranceProgress);
 
     private void RenderFlight()
     {
@@ -189,6 +308,8 @@ public partial class CursorOverlayWindow : Window
                 _isFlying = false;
                 _flightHoldUntil = default;
                 BubbleBorder.Visibility = Visibility.Collapsed;
+                // Resume the follow spring from where the flight ended.
+                _followInitialized = false;
                 var callback = _flightArrivalCallback;
                 _flightArrivalCallback = null;
                 callback?.Invoke();
@@ -209,6 +330,7 @@ public partial class CursorOverlayWindow : Window
         var tangentY = 2 * oneMinusT * (_flightControl.Y - _flightStart.Y) + 2 * _flightProgress * (_flightTarget.Y - _flightControl.Y);
 
         TriangleShape.Visibility = Visibility.Visible;
+        TriangleShape.Opacity = 1.0;
         WaveformCanvas.Visibility = Visibility.Collapsed;
         SpinnerShape.Visibility = Visibility.Collapsed;
 
@@ -218,15 +340,16 @@ public partial class CursorOverlayWindow : Window
         var scale = 1.0 + 0.3 * Math.Sin(_flightProgress * Math.PI);
         TriangleScale.ScaleX = scale;
         TriangleScale.ScaleY = scale;
-        TriangleGlow.BlurRadius = 8 + (scale - 1.0) * 20;
+        TriangleGlow.BlurRadius = 10 + (scale - 1.0) * 22;
 
-        Canvas.SetLeft(TriangleShape, position.X - 10);
-        Canvas.SetTop(TriangleShape, position.Y);
+        Canvas.SetLeft(TriangleShape, position.X - 8);
+        Canvas.SetTop(TriangleShape, position.Y - 7);
         _lastTrianglePosition = position;
+        _followPosition = position;
 
         if (!string.IsNullOrEmpty(_flightBubbleText))
         {
-            ShowBubble(_flightBubbleText, position);
+            ShowFlightBubble(_flightBubbleText, position);
         }
     }
 
@@ -244,29 +367,26 @@ public partial class CursorOverlayWindow : Window
                 TriangleShape.Visibility = Visibility.Collapsed;
                 WaveformCanvas.Visibility = Visibility.Collapsed;
                 SpinnerShape.Visibility = Visibility.Visible;
+                SpinnerShape.Opacity = EntranceOpacity;
                 Canvas.SetLeft(SpinnerShape, cursorLocal.X + 14);
                 Canvas.SetTop(SpinnerShape, cursorLocal.Y + 14);
                 break;
 
-            default: // Idle or Responding — show the triangle following the cursor.
+            default: // Idle or Responding — show the arrow following the cursor.
                 WaveformCanvas.Visibility = Visibility.Collapsed;
                 SpinnerShape.Visibility = Visibility.Collapsed;
                 TriangleShape.Visibility = Visibility.Visible;
+                TriangleShape.Opacity = EntranceOpacity;
                 TriangleScale.ScaleX = 1;
                 TriangleScale.ScaleY = 1;
                 TriangleRotation.Angle = -35;
-                TriangleGlow.BlurRadius = 8;
+                TriangleGlow.BlurRadius = 10;
                 Canvas.SetLeft(TriangleShape, cursorLocal.X);
                 Canvas.SetTop(TriangleShape, cursorLocal.Y);
                 break;
         }
 
-        // Show the response bubble while responding, anchored near the cursor.
-        if (_voiceState == CompanionVoiceState.Responding && !string.IsNullOrEmpty(_responseBubbleText))
-        {
-            ShowBubble(_responseBubbleText, cursorLocal);
-        }
-        else if (!_isFlying)
+        if (!_isFlying)
         {
             BubbleBorder.Visibility = Visibility.Collapsed;
         }
@@ -275,6 +395,7 @@ public partial class CursorOverlayWindow : Window
     private void RenderWaveform(Point cursorLocal)
     {
         WaveformCanvas.Visibility = Visibility.Visible;
+        WaveformCanvas.Opacity = EntranceOpacity;
         Canvas.SetLeft(WaveformCanvas, cursorLocal.X + 12);
         Canvas.SetTop(WaveformCanvas, cursorLocal.Y - 20);
 
@@ -286,12 +407,160 @@ public partial class CursorOverlayWindow : Window
             var top = (30 - height) / 2;
             _waveformBars[barIndex].Points = new PointCollection
             {
-                new(0, top), new(6, top), new(6, top + height), new(0, top + height)
+                new(0, top), new(4, top), new(4, top + height), new(0, top + height)
             };
         }
     }
 
-    private void ShowBubble(string text, Point anchor)
+    // ── Response card ────────────────────────────────────────────────────
+
+    private void UpdateResponseCard(bool cursorOnThisMonitor, Point cursorRaw)
+    {
+        // Fade toward the target opacity each frame.
+        var fadeStep = 0.12;
+        if (_responseCardOpacity < _responseCardOpacityTarget)
+        {
+            _responseCardOpacity = Math.Min(_responseCardOpacityTarget, _responseCardOpacity + fadeStep);
+        }
+        else if (_responseCardOpacity > _responseCardOpacityTarget)
+        {
+            _responseCardOpacity = Math.Max(_responseCardOpacityTarget, _responseCardOpacity - fadeStep);
+        }
+
+        // Fully faded out → collapse and stop.
+        if (_responseCardOpacity <= 0.001 && _responseCardOpacityTarget == 0.0)
+        {
+            ResponseCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // Only the monitor the cursor is on hosts the card; others stay hidden.
+        if (!cursorOnThisMonitor)
+        {
+            ResponseCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ResponseBodyRun.Text = _responseText ?? string.Empty;
+
+        // Blink the caret while streaming; hide it once the answer is final.
+        if (_responseStreaming)
+        {
+            if ((DateTime.UtcNow - _lastCaretToggle).TotalMilliseconds > 500)
+            {
+                _caretOn = !_caretOn;
+                _lastCaretToggle = DateTime.UtcNow;
+            }
+            ResponseCaretRun.Text = _caretOn ? "▍" : " ";
+        }
+        else
+        {
+            ResponseCaretRun.Text = string.Empty;
+        }
+
+        ResponseCard.Visibility = Visibility.Visible;
+        ResponseCard.Opacity = _responseCardOpacity;
+        ResponseCard.UpdateLayout();
+
+        // Anchor below-right of the cursor; flip if it would run off the monitor.
+        var cardX = cursorRaw.X + 18;
+        if (cardX + ResponseCard.ActualWidth > Width)
+        {
+            cardX = cursorRaw.X - ResponseCard.ActualWidth - 16;
+        }
+
+        var cardY = cursorRaw.Y + 22;
+        if (cardY + ResponseCard.ActualHeight > Height)
+        {
+            cardY = cursorRaw.Y - ResponseCard.ActualHeight - 14;
+        }
+
+        Canvas.SetLeft(ResponseCard, Math.Max(8, cardX));
+        Canvas.SetTop(ResponseCard, Math.Max(8, cardY));
+    }
+
+    // ── Welcome ──────────────────────────────────────────────────────────
+
+    private void UpdateWelcome(bool shouldShowCompanion, Point cursorRaw)
+    {
+        if (_welcomePhase == WelcomePhase.Done)
+        {
+            return;
+        }
+
+        // Wait until the companion has gracefully faded in, and claim the one-time
+        // welcome globally so it only ever appears on a single monitor.
+        if (_welcomePhase == WelcomePhase.Pending)
+        {
+            if (!shouldShowCompanion || _entranceProgress < 0.85 || _welcomeConsumed)
+            {
+                if (_welcomeConsumed)
+                {
+                    _welcomePhase = WelcomePhase.Done;
+                }
+                return;
+            }
+
+            _welcomeConsumed = true;
+            _welcomePhase = WelcomePhase.Revealing;
+            _welcomeRevealedCharacters = 0;
+            _welcomeNextCharacterTime = DateTime.UtcNow;
+            WelcomeText.Text = string.Empty;
+            WelcomeBubble.Visibility = Visibility.Visible;
+        }
+
+        if (!shouldShowCompanion)
+        {
+            // Cursor left this monitor mid-welcome — just end it.
+            WelcomeBubble.Visibility = Visibility.Collapsed;
+            _welcomePhase = WelcomePhase.Done;
+            return;
+        }
+
+        switch (_welcomePhase)
+        {
+            case WelcomePhase.Revealing:
+                _welcomeOpacity = Math.Min(1.0, _welcomeOpacity + 0.1);
+                if (DateTime.UtcNow >= _welcomeNextCharacterTime && _welcomeRevealedCharacters < WelcomeMessage.Length)
+                {
+                    _welcomeRevealedCharacters++;
+                    WelcomeText.Text = WelcomeMessage[.._welcomeRevealedCharacters];
+                    _welcomeNextCharacterTime = DateTime.UtcNow + TimeSpan.FromMilliseconds(45);
+                    if (_welcomeRevealedCharacters >= WelcomeMessage.Length)
+                    {
+                        _welcomePhase = WelcomePhase.Holding;
+                        _welcomeHoldUntil = DateTime.UtcNow + TimeSpan.FromSeconds(2.4);
+                    }
+                }
+                break;
+
+            case WelcomePhase.Holding:
+                if (DateTime.UtcNow >= _welcomeHoldUntil)
+                {
+                    _welcomePhase = WelcomePhase.FadingOut;
+                }
+                break;
+
+            case WelcomePhase.FadingOut:
+                _welcomeOpacity = Math.Max(0.0, _welcomeOpacity - 0.06);
+                if (_welcomeOpacity <= 0.001)
+                {
+                    WelcomeBubble.Visibility = Visibility.Collapsed;
+                    _welcomePhase = WelcomePhase.Done;
+                    return;
+                }
+                break;
+        }
+
+        WelcomeBubble.Opacity = _welcomeOpacity;
+        WelcomeBubble.UpdateLayout();
+        Canvas.SetLeft(WelcomeBubble, cursorRaw.X + 16);
+        Canvas.SetTop(WelcomeBubble, cursorRaw.Y + 22);
+    }
+
+    // ── Pointing bubble ──────────────────────────────────────────────────
+
+    private void ShowFlightBubble(string text, Point anchor)
     {
         BubbleText.Text = text;
         BubbleBorder.Visibility = Visibility.Visible;
@@ -314,7 +583,7 @@ public partial class CursorOverlayWindow : Window
         Canvas.SetTop(BubbleBorder, Math.Max(0, bubbleY));
     }
 
-    private void HideAllVisuals()
+    private void HideCompanionVisuals()
     {
         TriangleShape.Visibility = Visibility.Collapsed;
         WaveformCanvas.Visibility = Visibility.Collapsed;
@@ -323,6 +592,8 @@ public partial class CursorOverlayWindow : Window
         {
             BubbleBorder.Visibility = Visibility.Collapsed;
         }
+        // Leaving this monitor resets the follow spring so it re-seats cleanly on return.
+        _followInitialized = false;
     }
 
     /// <summary>Reads the global cursor position and converts it to this window's local DIP space if it's on this monitor.</summary>

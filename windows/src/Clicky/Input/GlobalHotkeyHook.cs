@@ -1,5 +1,7 @@
 using Clicky.Core;
 using Clicky.Platform;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 
 namespace Clicky.Input;
 
@@ -51,6 +53,10 @@ public sealed class GlobalHotkeyHook : IDisposable
 
         var moduleHandle = NativeMethods.GetModuleHandle(null);
         _hookHandle = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _hookCallback, moduleHandle, 0);
+        if (_hookHandle == IntPtr.Zero)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not install the global push-to-talk keyboard hook.");
+        }
     }
 
     public void Stop()

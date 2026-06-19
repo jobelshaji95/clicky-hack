@@ -1,8 +1,11 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Text;
 using System.Windows;
 using Clicky.Ai;
 using Clicky.Audio;
 using Clicky.Capture;
+using Clicky.Diagnostics;
 using Clicky.Input;
 using Clicky.Platform;
 using Clicky.Services;
@@ -14,7 +17,9 @@ namespace Clicky.Core;
 /// Central state machine for the companion, ported from the macOS CompanionManager.
 /// Owns the full push-to-talk pipeline: global hotkey → microphone capture →
 /// local Whisper transcription → multi-monitor screenshot → local vision LLM →
-/// local Piper TTS → blue cursor pointing. Exposes observable state for the panel UI.
+/// streamed on-screen response card → blue cursor pointing. Audio output is
+/// intentionally disabled — the response is shown, not spoken. Exposes observable
+/// state for the panel UI.
 /// </summary>
 public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 {
@@ -25,7 +30,6 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
     private readonly ScreenCaptureService _screenCapture = new();
     private readonly LlamaServerProcess _llamaServer;
     private readonly LocalVisionLlmClient _visionLlm;
-    private readonly PiperTtsClient _tts;
     private readonly OverlayWindowManager _overlayManager = new();
     private readonly PermissionService _permissionService = new();
     private readonly ConversationHistory _conversationHistory = new();
@@ -33,7 +37,7 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
     private CancellationTokenSource? _currentResponseCancellation;
     private CancellationTokenSource? _transientHideCancellation;
     private double _currentAudioPowerLevel;
-    private string? _activeResponseBubbleText;
+    private string? _startupWarningStatusText;
 
     public CompanionManager(AppConfig config)
     {
@@ -42,7 +46,6 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         _transcriptionProvider = new WhisperLocalTranscriptionProvider(config.Stt);
         _llamaServer = new LlamaServerProcess(config.VisionLlm);
         _visionLlm = new LocalVisionLlmClient(config.VisionLlm);
-        _tts = new PiperTtsClient(config.Tts);
 
         IsCursorEnabled = config.Overlay.ShowCursorByDefault;
 
@@ -99,11 +102,26 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 
     public void Start()
     {
-        _hotkeyHook.Start();
+        try
+        {
+            _hotkeyHook.Start();
+            ClickyLog.Info("Hotkey", "Global push-to-talk hook installed (Ctrl+Alt).");
+        }
+        catch (Exception exception)
+        {
+            _startupWarningStatusText = $"Hotkey error: {exception.Message}";
+            StatusText = _startupWarningStatusText;
+            ClickyLog.Error("Hotkey", "Failed to install global hotkey hook", exception);
+        }
 
         if (IsCursorEnabled)
         {
             _overlayManager.ShowOverlay();
+            // Push the initial state so the overlays activate (_isActiveMonitor) and
+            // render the idle companion right away. Without this the first state push
+            // only happens on the first Ctrl+Alt press, leaving the cursor companion
+            // invisible at startup.
+            PushOverlayState();
         }
 
         // Warm up the local models in the background so the first interaction is fast.
@@ -115,18 +133,26 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         try
         {
             StatusText = "Loading speech model…";
+            ClickyLog.Info("Init", "Loading Whisper speech model…");
             await _transcriptionProvider.InitializeAsync().ConfigureAwait(false);
+            ClickyLog.Info("Init", "Whisper model loaded.");
 
             StatusText = "Starting vision model…";
+            ClickyLog.Info("Init", "Starting llama.cpp vision server…");
             await _llamaServer.StartAndWaitUntilReadyAsync().ConfigureAwait(false);
+            ClickyLog.Info("Init", "Vision server healthy.");
 
-            StatusText = _permissionService.HasMicrophone()
+            var hasMicrophone = _permissionService.HasMicrophone();
+            var readyStatusText = hasMicrophone
                 ? "Ready — hold Ctrl+Alt and talk"
                 : "No microphone detected";
+            StatusText = _startupWarningStatusText ?? readyStatusText;
+            ClickyLog.Info("Init", $"Ready. microphone={hasMicrophone}.");
         }
         catch (Exception exception)
         {
             StatusText = $"Setup error: {exception.Message}";
+            ClickyLog.Error("Init", "Model warm-up failed", exception);
         }
     }
 
@@ -155,10 +181,10 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        // Cancel any in-flight response / TTS / pointing from a previous utterance.
+        // Cancel any in-flight response / pointing from a previous utterance.
         CancelCurrentResponse();
         CancelTransientHide();
-        _tts.StopPlayback();
+        _overlayManager.HideResponse();
         _overlayManager.CancelPointing();
 
         // Bring the cursor back transiently if it's hidden.
@@ -169,6 +195,7 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 
         _microphone.StartCapture();
         VoiceState = CompanionVoiceState.Listening;
+        ClickyLog.Info("Hotkey", "Pressed — listening.");
     }
 
     private void OnHotkeyReleased()
@@ -206,13 +233,27 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 
         _ = Task.Run(async () =>
         {
+            // Capture this interaction for the debug history (transcript, response,
+            // pointing, per-stage timings, any error) and time the whole thing.
+            var interaction = new InteractionRecord();
+            var totalStopwatch = Stopwatch.StartNew();
+
             try
             {
+                ClickyLog.Info("Pipeline", $"Interaction start — {samples.Length} audio samples.");
+
+                var transcriptionStopwatch = Stopwatch.StartNew();
                 var transcript = await _transcriptionProvider.TranscribeAsync(samples, cancellationToken).ConfigureAwait(false);
+                transcriptionStopwatch.Stop();
+                interaction.TranscriptionMs = transcriptionStopwatch.ElapsedMilliseconds;
                 cancellationToken.ThrowIfCancellationRequested();
+
+                interaction.Transcript = transcript;
+                ClickyLog.Info("Pipeline", $"Transcribed in {interaction.TranscriptionMs}ms: \"{transcript}\"");
 
                 if (string.IsNullOrWhiteSpace(transcript))
                 {
+                    ClickyLog.Info("Pipeline", "Empty transcript — nothing to send.");
                     SetVoiceStateOnUi(CompanionVoiceState.Idle);
                     return;
                 }
@@ -221,6 +262,7 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 
                 var screenCaptures = await _screenCapture.CaptureAllScreensAsJpegAsync().ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
+                ClickyLog.Info("Pipeline", $"Captured {screenCaptures.Count} screen(s).");
 
                 var labeledImages = screenCaptures
                     .Select(capture => new LabeledImage(
@@ -228,49 +270,98 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
                         $"{capture.Label} (image dimensions: {capture.ScreenshotWidthInPixels}x{capture.ScreenshotHeightInPixels} pixels)"))
                     .ToList();
 
+                // Stream the model's text straight into the on-screen response card.
+                // The first token flips the state to Responding (so the cursor's
+                // spinner gives way to the card) and the card reveals text as it
+                // arrives — no audio is produced.
+                var accumulatedResponse = new StringBuilder();
+                var hasStartedResponding = false;
+                var visionStopwatch = Stopwatch.StartNew();
+
                 var fullResponse = await _visionLlm.AnalyzeImagesStreamingAsync(
                     labeledImages,
                     SystemPrompts.CompanionVoiceResponse,
                     _conversationHistory.Exchanges,
                     transcript,
-                    onTextChunk: _ => { /* spinner stays until TTS plays */ },
+                    onTextChunk: chunk =>
+                    {
+                        accumulatedResponse.Append(chunk);
+
+                        if (!hasStartedResponding)
+                        {
+                            hasStartedResponding = true;
+                            SetVoiceStateOnUi(CompanionVoiceState.Responding);
+                        }
+
+                        // Hide the trailing [POINT:...] machine tag while streaming so
+                        // the user only ever sees clean prose.
+                        var visibleText = StripTrailingPointTag(accumulatedResponse.ToString());
+                        if (!string.IsNullOrWhiteSpace(visibleText))
+                        {
+                            _overlayManager.UpdateResponse(visibleText, isStreaming: true);
+                        }
+                    },
                     cancellationToken).ConfigureAwait(false);
 
+                visionStopwatch.Stop();
+                interaction.VisionMs = visionStopwatch.ElapsedMilliseconds;
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var parseResult = PointTagParser.Parse(fullResponse);
                 var spokenText = parseResult.SpokenText;
 
-                HandlePointing(parseResult, screenCaptures);
+                interaction.Response = spokenText;
+                interaction.Pointed = parseResult.HasCoordinate;
+                interaction.PointLabel = parseResult.ElementLabel;
+                interaction.PointX = parseResult.PointX is { } pointX ? (int)pointX : null;
+                interaction.PointY = parseResult.PointY is { } pointY ? (int)pointY : null;
+                interaction.ScreenNumber = parseResult.ScreenNumber;
+                ClickyLog.Info("Pipeline",
+                    $"Vision answered in {interaction.VisionMs}ms (pointed={interaction.Pointed}): \"{spokenText}\"");
 
                 _conversationHistory.Append(transcript, spokenText);
 
                 if (!string.IsNullOrWhiteSpace(spokenText))
                 {
-                    _activeResponseBubbleText = spokenText;
-                    await _tts.SpeakTextAsync(spokenText, cancellationToken).ConfigureAwait(false);
-                    SetVoiceStateOnUi(CompanionVoiceState.Responding);
+                    // Settle on the final, fully-parsed text (caret off), fly the cursor
+                    // to anything it referenced, then hold the card long enough to read.
+                    _overlayManager.UpdateResponse(spokenText, isStreaming: false);
+                    HandlePointing(parseResult, screenCaptures);
 
-                    // Wait for playback to finish before returning to idle.
-                    while (_tts.IsPlaying && !cancellationToken.IsCancellationRequested)
-                    {
-                        await Task.Delay(150, cancellationToken).ConfigureAwait(false);
-                    }
+                    await Task.Delay(ComputeReadDurationMilliseconds(spokenText), cancellationToken).ConfigureAwait(false);
+                    _overlayManager.HideResponse();
+                }
+                else
+                {
+                    _overlayManager.HideResponse();
+                    HandlePointing(parseResult, screenCaptures);
                 }
             }
             catch (OperationCanceledException)
             {
-                // User spoke again — interrupted on purpose.
+                interaction.Error = "canceled";
+                ClickyLog.Info("Pipeline", "Interaction canceled (user interrupted).");
             }
             catch (Exception exception)
             {
+                interaction.Error = exception.Message;
+                ClickyLog.Error("Pipeline", "Response pipeline failed", exception);
                 StatusText = $"Response error: {exception.Message}";
             }
             finally
             {
+                totalStopwatch.Stop();
+                interaction.TotalMs = totalStopwatch.ElapsedMilliseconds;
+
+                // Only record interactions that actually carried a transcript or failed.
+                if (!string.IsNullOrWhiteSpace(interaction.Transcript) || interaction.Error is not null)
+                {
+                    InteractionHistory.Append(interaction);
+                }
+
                 if (!cancellationToken.IsCancellationRequested)
                 {
-                    _activeResponseBubbleText = null;
+                    _overlayManager.HideResponse();
                     SetVoiceStateOnUi(CompanionVoiceState.Idle);
                     ScheduleTransientHideIfNeeded();
                 }
@@ -323,11 +414,6 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         {
             try
             {
-                while (_tts.IsPlaying)
-                {
-                    await Task.Delay(200, token).ConfigureAwait(false);
-                }
-
                 await Task.Delay(1000, token).ConfigureAwait(false);
                 _overlayManager.FadeOutAndHideOverlay();
             }
@@ -353,7 +439,47 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
     // ── Helpers ─────────────────────────────────────────────────────────
 
     private void PushOverlayState() =>
-        _overlayManager.UpdateCompanionState(_voiceState, _currentAudioPowerLevel, IsCursorEnabled, _activeResponseBubbleText);
+        _overlayManager.UpdateCompanionState(_voiceState, _currentAudioPowerLevel, IsCursorEnabled);
+
+    /// <summary>
+    /// Removes a trailing (possibly partial) "[POINT:...]" tag from streaming text so
+    /// the response card never flashes the machine-readable pointing tag. Handles both
+    /// a complete tag and a half-streamed prefix like "[POIN" at the very end.
+    /// </summary>
+    private static string StripTrailingPointTag(string text)
+    {
+        const string marker = "[POINT";
+
+        var markerIndex = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex >= 0)
+        {
+            return text[..markerIndex].TrimEnd();
+        }
+
+        // Trim a trailing partial prefix of the marker (e.g. text ending in "[PO").
+        for (var prefixLength = Math.Min(marker.Length - 1, text.Length); prefixLength > 0; prefixLength--)
+        {
+            var suffix = text[^prefixLength..];
+            if (suffix[0] == '[' && marker.StartsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return text[..^prefixLength].TrimEnd();
+            }
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    /// How long to keep the finished response card on screen, scaled to its length so
+    /// short answers don't linger and long ones stay readable. Clamped to 2.5s–10s.
+    /// </summary>
+    private static int ComputeReadDurationMilliseconds(string text)
+    {
+        var wordCount = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        // ~3.3 words/sec reading speed, plus a fixed cushion to start and finish reading.
+        var estimatedMilliseconds = 1500 + (int)(wordCount / 3.3 * 1000);
+        return Math.Clamp(estimatedMilliseconds, 2500, 10000);
+    }
 
     private void SetVoiceStateOnUi(CompanionVoiceState state) =>
         Application.Current.Dispatcher.Invoke(() => VoiceState = state);
@@ -370,7 +496,6 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         _microphone.CancelCapture();
         CancelCurrentResponse();
         CancelTransientHide();
-        _tts.StopPlayback();
         _overlayManager.ShutdownAll();
     }
 
@@ -381,6 +506,5 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         _microphone.Dispose();
         (_transcriptionProvider as IDisposable)?.Dispose();
         _llamaServer.Dispose();
-        _tts.Dispose();
     }
 }

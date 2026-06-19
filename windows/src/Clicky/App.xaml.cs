@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using Clicky.Core;
+using Clicky.Diagnostics;
 using Clicky.Services;
 using Clicky.UI;
 
@@ -21,10 +22,16 @@ public partial class App : Application
     {
         base.OnStartup(eventArgs);
 
+        ClickyLog.Initialize();
+        ClickyLog.Info("App", $"Logs at {ClickyLog.LogDirectory}");
+
         // Surface unexpected errors instead of silently dying with no window.
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         _config = AppConfig.Load();
+        ClickyLog.Info("App",
+            $"Config loaded. ManageServerProcess={_config.VisionLlm.ManageServerProcess}, " +
+            $"models present={new FirstRunModelDownloader(_config.VisionLlm, _config.ModelDownloads).AreModelsPresent()}");
 
         // First-run: pull the large vision model with a progress UI. Small models
         // (Whisper, Piper) ship in the installer, so they aren't downloaded here.
@@ -47,6 +54,7 @@ public partial class App : Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs args)
     {
+        ClickyLog.Error("App", "Unhandled dispatcher exception", args.Exception);
         MessageBox.Show(args.Exception.Message, "Clicky", MessageBoxButton.OK, MessageBoxImage.Error);
         args.Handled = true;
     }
