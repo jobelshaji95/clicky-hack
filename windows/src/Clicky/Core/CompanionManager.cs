@@ -39,6 +39,14 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
     private double _currentAudioPowerLevel;
     private string? _startupWarningStatusText;
 
+    // Playful phrases shown in the flight bubble when the cursor points at something,
+    // matching the macOS companion's "right here!" personality.
+    private static readonly string[] PointingPhrases =
+    {
+        "right here!", "this one!", "over here!", "click this!", "here it is!", "found it!", "look here!"
+    };
+    private static readonly Random PointingPhraseRandom = new();
+
     public CompanionManager(AppConfig config)
     {
         _config = config;
@@ -392,9 +400,12 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         var target = CoordinateMapper.MapScreenshotPointToDesktop(
             parseResult.PointX!.Value, parseResult.PointY!.Value, targetMonitor);
 
-        // Show the triangle (idle visual) so the flight is visible, then fly.
+        // Show the triangle (idle visual) so the flight is visible, then fly. The
+        // flight bubble shows a playful phrase (matching the macOS companion) rather
+        // than the raw element label, which feels more like a buddy nudging you over.
+        var pointingPhrase = PointingPhrases[PointingPhraseRandom.Next(PointingPhrases.Length)];
         SetVoiceStateOnUi(CompanionVoiceState.Idle);
-        _overlayManager.PointTo(target, parseResult.ElementLabel, onArrived: () => { /* returns to cursor-follow automatically */ });
+        _overlayManager.PointTo(target, pointingPhrase, onArrived: () => { /* returns to cursor-follow automatically */ });
     }
 
     // ── Transient cursor mode ───────────────────────────────────────────
