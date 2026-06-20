@@ -45,6 +45,24 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetCursorPos(out POINT cursorPosition);
 
+    /// <summary>The window the user is currently working in — the anchor for label-based pointing.</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    /// <summary>Window bounds in physical screen pixels — used to locate the caption's close button.</summary>
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(IntPtr windowHandle, out RECT rect);
+
     // ── Synthesized input (Agent Mode) ──────────────────────────────────
     // SendInput drives the real mouse/keyboard so Agent Mode can click and type.
     [DllImport("user32.dll")]

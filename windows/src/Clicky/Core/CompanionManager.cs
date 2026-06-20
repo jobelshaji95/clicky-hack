@@ -465,15 +465,36 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         var target = CoordinateMapper.MapScreenshotPointToDesktop(
             parseResult.PointX!.Value, parseResult.PointY!.Value, targetMonitor);
 
-        // Element grounding: snap the model's approximate point to the real control
-        // under it via UI Automation, so pointing lands precisely on the button/field.
-        var refined = ElementGrounding.RefineToElementCenter(target.GlobalDeviceX, target.GlobalDeviceY);
-        if (refined is { } refinedPoint)
+        // Element grounding. The local vision model is good at NAMING the target but
+        // often poor at its pixel COORDINATES, so trust the label first: find the real
+        // control named like the label in the foreground window and point there. Only if
+        // that fails do we fall back to snapping to whatever control is under the model's
+        // raw point, then to the raw point itself.
+        var monitorBounds = target.Monitor.MonitorBounds;
+        var labelGrounded = !string.IsNullOrWhiteSpace(parseResult.ElementLabel)
+            ? ElementGrounding.RefineToLabeledElement(
+                parseResult.ElementLabel!,
+                target.GlobalDeviceX, target.GlobalDeviceY,
+                monitorBounds.Left, monitorBounds.Top, monitorBounds.Right, monitorBounds.Bottom)
+            : null;
+
+        if (labelGrounded is { } labelPoint)
         {
             ClickyLog.Info("Pointing",
-                $"Snapped ({target.GlobalDeviceX:0},{target.GlobalDeviceY:0}) → " +
-                $"({refinedPoint.X:0},{refinedPoint.Y:0}) via UI Automation.");
-            target = target with { GlobalDeviceX = refinedPoint.X, GlobalDeviceY = refinedPoint.Y };
+                $"Label-grounded '{parseResult.ElementLabel}': model said " +
+                $"({target.GlobalDeviceX:0},{target.GlobalDeviceY:0}) → control at ({labelPoint.X:0},{labelPoint.Y:0}).");
+            target = target with { GlobalDeviceX = labelPoint.X, GlobalDeviceY = labelPoint.Y };
+        }
+        else
+        {
+            var refined = ElementGrounding.RefineToElementCenter(target.GlobalDeviceX, target.GlobalDeviceY);
+            if (refined is { } refinedPoint)
+            {
+                ClickyLog.Info("Pointing",
+                    $"Snapped ({target.GlobalDeviceX:0},{target.GlobalDeviceY:0}) → " +
+                    $"({refinedPoint.X:0},{refinedPoint.Y:0}) via UI Automation.");
+                target = target with { GlobalDeviceX = refinedPoint.X, GlobalDeviceY = refinedPoint.Y };
+            }
         }
 
         // Show the triangle (idle visual) so the flight is visible, then fly. The
