@@ -425,6 +425,17 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         var target = CoordinateMapper.MapScreenshotPointToDesktop(
             parseResult.PointX!.Value, parseResult.PointY!.Value, targetMonitor);
 
+        // Element grounding: snap the model's approximate point to the real control
+        // under it via UI Automation, so pointing lands precisely on the button/field.
+        var refined = ElementGrounding.RefineToElementCenter(target.GlobalDeviceX, target.GlobalDeviceY);
+        if (refined is { } refinedPoint)
+        {
+            ClickyLog.Info("Pointing",
+                $"Snapped ({target.GlobalDeviceX:0},{target.GlobalDeviceY:0}) → " +
+                $"({refinedPoint.X:0},{refinedPoint.Y:0}) via UI Automation.");
+            target = target with { GlobalDeviceX = refinedPoint.X, GlobalDeviceY = refinedPoint.Y };
+        }
+
         // Show the triangle (idle visual) so the flight is visible, then fly. The
         // flight bubble shows a playful phrase (matching the macOS companion) rather
         // than the raw element label, which feels more like a buddy nudging you over.
