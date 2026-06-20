@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Windows;
 using Clicky.Ai;
@@ -133,6 +134,9 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
             ClickyLog.Error("Hotkey", "Failed to install global hotkey hook", exception);
         }
 
+        // Decide whether to show the first-run onboarding guide before the overlays appear.
+        DetermineFirstRunOnboarding();
+
         if (IsCursorEnabled)
         {
             _overlayManager.ShowOverlay();
@@ -145,6 +149,31 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 
         // Warm up the local models in the background so the first interaction is fast.
         _ = InitializeModelsAsync();
+    }
+
+    /// <summary>
+    /// Shows the first-run onboarding guide only on the very first launch. A flag file
+    /// under the user data folder marks that onboarding has run, so later launches go
+    /// straight to the idle companion with no welcome.
+    /// </summary>
+    private void DetermineFirstRunOnboarding()
+    {
+        try
+        {
+            var onboardedFlagPath = Path.Combine(AppConfig.UserDataDirectory, "onboarded.flag");
+            var isFirstRun = !File.Exists(onboardedFlagPath);
+            CursorOverlayWindow.OnboardingEnabled = isFirstRun;
+
+            if (isFirstRun)
+            {
+                File.WriteAllText(onboardedFlagPath, DateTime.UtcNow.ToString("o"));
+                ClickyLog.Info("Onboarding", "First run — showing the welcome guide.");
+            }
+        }
+        catch (Exception exception)
+        {
+            ClickyLog.Warn("Onboarding", exception.Message);
+        }
     }
 
     private async Task InitializeModelsAsync()

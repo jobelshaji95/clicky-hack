@@ -69,11 +69,19 @@ public partial class CursorOverlayWindow : Window
     // Live partial transcript shown while the user speaks.
     private string? _listeningCaptionText;
 
-    // ── One-time welcome ─────────────────────────────────────────────────
+    // ── First-run onboarding welcome ─────────────────────────────────────
+    /// <summary>Set true by the manager only on the very first run, before overlays show.</summary>
+    public static bool OnboardingEnabled;
     private static bool _welcomeConsumed;
     private enum WelcomePhase { Pending, Revealing, Holding, FadingOut, Done }
     private WelcomePhase _welcomePhase = WelcomePhase.Pending;
-    private const string WelcomeMessage = "hey, i'm clicky";
+    // A short, streamed two-step intro shown once, ever, on first launch.
+    private static readonly string[] WelcomeMessages =
+    {
+        "hey, i'm clicky",
+        "press ctrl + alt and say hi"
+    };
+    private int _welcomeMessageIndex;
     private int _welcomeRevealedCharacters;
     private DateTime _welcomeNextCharacterTime;
     private DateTime _welcomeHoldUntil;
@@ -529,20 +537,22 @@ public partial class CursorOverlayWindow : Window
             return;
         }
 
-        // Wait until the companion has gracefully faded in, and claim the one-time
-        // welcome globally so it only ever appears on a single monitor.
+        // Only the very first run shows onboarding, and only once across all monitors.
         if (_welcomePhase == WelcomePhase.Pending)
         {
-            if (!shouldShowCompanion || _entranceProgress < 0.85 || _welcomeConsumed)
+            if (!OnboardingEnabled || _welcomeConsumed)
             {
-                if (_welcomeConsumed)
-                {
-                    _welcomePhase = WelcomePhase.Done;
-                }
+                _welcomePhase = WelcomePhase.Done;
+                return;
+            }
+
+            if (!shouldShowCompanion || _entranceProgress < 0.85)
+            {
                 return;
             }
 
             _welcomeConsumed = true;
+            _welcomeMessageIndex = 0;
             _welcomePhase = WelcomePhase.Revealing;
             _welcomeRevealedCharacters = 0;
             _welcomeNextCharacterTime = DateTime.UtcNow;
@@ -558,19 +568,23 @@ public partial class CursorOverlayWindow : Window
             return;
         }
 
+        var currentMessage = WelcomeMessages[_welcomeMessageIndex];
+        var isLastMessage = _welcomeMessageIndex >= WelcomeMessages.Length - 1;
+
         switch (_welcomePhase)
         {
             case WelcomePhase.Revealing:
                 _welcomeOpacity = Math.Min(1.0, _welcomeOpacity + 0.1);
-                if (DateTime.UtcNow >= _welcomeNextCharacterTime && _welcomeRevealedCharacters < WelcomeMessage.Length)
+                if (DateTime.UtcNow >= _welcomeNextCharacterTime && _welcomeRevealedCharacters < currentMessage.Length)
                 {
                     _welcomeRevealedCharacters++;
-                    WelcomeText.Text = WelcomeMessage[.._welcomeRevealedCharacters];
+                    WelcomeText.Text = currentMessage[.._welcomeRevealedCharacters];
                     _welcomeNextCharacterTime = DateTime.UtcNow + TimeSpan.FromMilliseconds(45);
-                    if (_welcomeRevealedCharacters >= WelcomeMessage.Length)
+                    if (_welcomeRevealedCharacters >= currentMessage.Length)
                     {
                         _welcomePhase = WelcomePhase.Holding;
-                        _welcomeHoldUntil = DateTime.UtcNow + TimeSpan.FromSeconds(2.4);
+                        // Linger longer on the final, actionable line.
+                        _welcomeHoldUntil = DateTime.UtcNow + TimeSpan.FromSeconds(isLastMessage ? 5.0 : 2.2);
                     }
                 }
                 break;
@@ -586,9 +600,20 @@ public partial class CursorOverlayWindow : Window
                 _welcomeOpacity = Math.Max(0.0, _welcomeOpacity - 0.06);
                 if (_welcomeOpacity <= 0.001)
                 {
-                    WelcomeBubble.Visibility = Visibility.Collapsed;
-                    _welcomePhase = WelcomePhase.Done;
-                    return;
+                    if (isLastMessage)
+                    {
+                        WelcomeBubble.Visibility = Visibility.Collapsed;
+                        _welcomePhase = WelcomePhase.Done;
+                        return;
+                    }
+
+                    // Advance to the next onboarding line.
+                    _welcomeMessageIndex++;
+                    _welcomeRevealedCharacters = 0;
+                    _welcomeOpacity = 0.0;
+                    _welcomeNextCharacterTime = DateTime.UtcNow;
+                    WelcomeText.Text = string.Empty;
+                    _welcomePhase = WelcomePhase.Revealing;
                 }
                 break;
         }
