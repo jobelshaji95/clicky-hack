@@ -36,6 +36,10 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 
     private CancellationTokenSource? _currentResponseCancellation;
     private CancellationTokenSource? _transientHideCancellation;
+    private CancellationTokenSource? _livePartialCancellation;
+    // Serializes all Whisper calls (live partials + the final transcription) so the
+    // shared whisper context is never used by two transcriptions at once.
+    private readonly SemaphoreSlim _transcriptionGate = new(1, 1);
     private double _currentAudioPowerLevel;
     private string? _startupWarningStatusText;
 
@@ -208,8 +212,10 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
             _overlayManager.ShowOverlay();
         }
 
+        _overlayManager.UpdateListeningCaption(null);
         _microphone.StartCapture();
         VoiceState = CompanionVoiceState.Listening;
+        StartLivePartialTranscription();
         ClickyLog.Info("Hotkey", "Pressed — listening.");
     }
 
@@ -219,6 +225,9 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         {
             return;
         }
+
+        StopLivePartialTranscription();
+        _overlayManager.UpdateListeningCaption(null);
 
         var samples = _microphone.StopCaptureAndExtractSamples();
         VoiceState = CompanionVoiceState.Processing;
@@ -258,7 +267,16 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
                 ClickyLog.Info("Pipeline", $"Interaction start — {samples.Length} audio samples.");
 
                 var transcriptionStopwatch = Stopwatch.StartNew();
-                var transcript = await _transcriptionProvider.TranscribeAsync(samples, cancellationToken).ConfigureAwait(false);
+                string transcript;
+                await _transcriptionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    transcript = await _transcriptionProvider.TranscribeAsync(samples, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _transcriptionGate.Release();
+                }
                 transcriptionStopwatch.Stop();
                 interaction.TranscriptionMs = transcriptionStopwatch.ElapsedMilliseconds;
                 cancellationToken.ThrowIfCancellationRequested();
@@ -415,6 +433,77 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         _overlayManager.PointTo(target, pointingPhrase, onArrived: () => { /* returns to cursor-follow automatically */ });
     }
 
+    // ── Live partial transcription ───────────────────────────────────────
+
+    /// <summary>
+    /// While the user holds the key, periodically re-transcribes the audio captured so
+    /// far and shows it as a live caption near the cursor. Each pass runs on a snapshot
+    /// (recording continues) and is serialized with the final transcription via the gate.
+    /// </summary>
+    private void StartLivePartialTranscription()
+    {
+        _livePartialCancellation?.Cancel();
+        _livePartialCancellation = new CancellationTokenSource();
+        var token = _livePartialCancellation.Token;
+
+        _ = Task.Run(async () =>
+        {
+            var lastTranscribedSampleCount = 0;
+            try
+            {
+                while (!token.IsCancellationRequested && _microphone.IsCapturing)
+                {
+                    await Task.Delay(1100, token).ConfigureAwait(false);
+
+                    var samples = _microphone.SnapshotSamples();
+
+                    // Need ~0.6s of audio, and ~0.4s of new audio since last pass, to bother.
+                    var minimumSamples = (int)(AudioConversion.WhisperSampleRate * 0.6);
+                    var minimumGrowth = (int)(AudioConversion.WhisperSampleRate * 0.4);
+                    if (samples.Length < minimumSamples ||
+                        samples.Length - lastTranscribedSampleCount < minimumGrowth)
+                    {
+                        continue;
+                    }
+
+                    // Don't queue up — if a transcription is already running, skip this tick.
+                    if (!await _transcriptionGate.WaitAsync(0, token).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        lastTranscribedSampleCount = samples.Length;
+                        var partialTranscript = await _transcriptionProvider.TranscribeAsync(samples, token).ConfigureAwait(false);
+                        if (!token.IsCancellationRequested && !string.IsNullOrWhiteSpace(partialTranscript))
+                        {
+                            _overlayManager.UpdateListeningCaption(partialTranscript);
+                        }
+                    }
+                    finally
+                    {
+                        _transcriptionGate.Release();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Key released — the final transcription takes over.
+            }
+            catch (Exception exception)
+            {
+                ClickyLog.Warn("LiveTranscribe", exception.Message);
+            }
+        }, token);
+    }
+
+    private void StopLivePartialTranscription()
+    {
+        _livePartialCancellation?.Cancel();
+        _livePartialCancellation = null;
+    }
+
     // ── Transient cursor mode ───────────────────────────────────────────
 
     private void ScheduleTransientHideIfNeeded()
@@ -512,6 +601,7 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
     {
         _hotkeyHook.Stop();
         _microphone.CancelCapture();
+        StopLivePartialTranscription();
         CancelCurrentResponse();
         CancelTransientHide();
         _overlayManager.ShutdownAll();

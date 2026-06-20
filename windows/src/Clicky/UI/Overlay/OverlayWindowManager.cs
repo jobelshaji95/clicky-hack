@@ -144,6 +144,18 @@ public sealed class OverlayWindowManager
         });
     }
 
+    /// <summary>Updates (or clears with null) the live partial-transcript caption shown while listening.</summary>
+    public void UpdateListeningCaption(string? text)
+    {
+        _uiDispatcher.BeginInvoke(() =>
+        {
+            foreach (var window in _overlayWindows)
+            {
+                window.SetListeningCaption(text);
+            }
+        });
+    }
+
     /// <summary>Sends the companion flying to a desktop point on its monitor.</summary>
     public void PointTo(PointingTarget target, string? bubbleText, Action onArrived)
     {

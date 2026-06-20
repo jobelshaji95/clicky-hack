@@ -53,6 +53,31 @@
         <!-- Listening waveform — bars sized by the live audio power level. -->
         <Canvas x:Name="WaveformCanvas" Visibility="Collapsed" Width="60" Height="40" />
 
+        <!-- Live partial transcript shown while the user is speaking. -->
+        <Border x:Name="ListeningCaption"
+                Visibility="Collapsed"
+                MaxWidth="300"
+                CornerRadius="9"
+                Padding="11,7">
+            <Border.Background>
+                <SolidColorBrush Color="#202221" Opacity="0.94" />
+            </Border.Background>
+            <Border.BorderBrush>
+                <SolidColorBrush Color="#373B39" Opacity="0.8" />
+            </Border.BorderBrush>
+            <Border.BorderThickness>1</Border.BorderThickness>
+            <Border.Effect>
+                <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="6" Opacity="0.45" Direction="270" />
+            </Border.Effect>
+            <TextBlock x:Name="ListeningCaptionText"
+                       Foreground="#ADB5B2"
+                       FontFamily="Segoe UI"
+                       FontSize="13"
+                       FontStyle="Italic"
+                       TextWrapping="Wrap"
+                       MaxWidth="278" />
+        </Border>
+
         <!-- Processing spinner — a rotating arc. -->
         <Path x:Name="SpinnerShape"
               Visibility="Collapsed"

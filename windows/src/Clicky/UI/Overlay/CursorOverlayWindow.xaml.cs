@@ -66,6 +66,9 @@ public partial class CursorOverlayWindow : Window
     private DateTime _lastCaretToggle = DateTime.UtcNow;
     private bool _caretOn = true;
 
+    // Live partial transcript shown while the user speaks.
+    private string? _listeningCaptionText;
+
     // ── One-time welcome ─────────────────────────────────────────────────
     private static bool _welcomeConsumed;
     private enum WelcomePhase { Pending, Revealing, Holding, FadingOut, Done }
@@ -182,6 +185,9 @@ public partial class CursorOverlayWindow : Window
         _responseCardOpacityTarget = string.IsNullOrEmpty(text) ? 0.0 : 1.0;
     }
 
+    /// <summary>Sets (or clears) the live partial-transcript caption shown while listening.</summary>
+    public void SetListeningCaption(string? text) => _listeningCaptionText = text;
+
     /// <summary>Begins a bezier flight from the current triangle position to a local DIP target.</summary>
     public void FlyToLocalPoint(double localDipX, double localDipY, string? bubbleText, Action onArrived)
     {
@@ -215,6 +221,7 @@ public partial class CursorOverlayWindow : Window
         // The response card and welcome pill track the actual pointer independently of
         // the companion's spring, so they stay glued to the cursor in every state.
         UpdateResponseCard(cursorOnThisMonitor, cursorRaw);
+        UpdateListeningCaption(cursorOnThisMonitor, cursorRaw);
 
         if (_isFlying)
         {
@@ -477,6 +484,40 @@ public partial class CursorOverlayWindow : Window
 
         Canvas.SetLeft(ResponseCard, Math.Max(8, cardX));
         Canvas.SetTop(ResponseCard, Math.Max(8, cardY));
+    }
+
+    // ── Listening caption ────────────────────────────────────────────────
+
+    private void UpdateListeningCaption(bool cursorOnThisMonitor, Point cursorRaw)
+    {
+        // Only while listening, with text, on the cursor's monitor.
+        if (_voiceState != CompanionVoiceState.Listening ||
+            string.IsNullOrWhiteSpace(_listeningCaptionText) ||
+            !cursorOnThisMonitor)
+        {
+            ListeningCaption.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ListeningCaptionText.Text = _listeningCaptionText;
+        ListeningCaption.Visibility = Visibility.Visible;
+        ListeningCaption.UpdateLayout();
+
+        // Sit above-right of the cursor (above the waveform); flip below if no room.
+        var captionX = cursorRaw.X + 16;
+        if (captionX + ListeningCaption.ActualWidth > Width)
+        {
+            captionX = Width - ListeningCaption.ActualWidth - 8;
+        }
+
+        var captionY = cursorRaw.Y - ListeningCaption.ActualHeight - 30;
+        if (captionY < 8)
+        {
+            captionY = cursorRaw.Y + 34;
+        }
+
+        Canvas.SetLeft(ListeningCaption, Math.Max(8, captionX));
+        Canvas.SetTop(ListeningCaption, Math.Max(8, captionY));
     }
 
     // ── Welcome ──────────────────────────────────────────────────────────

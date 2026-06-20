@@ -57,6 +57,22 @@ public sealed class MicrophoneCaptureService : IDisposable
     }
 
     /// <summary>
+    /// Returns the audio captured so far as 16 kHz mono float samples WITHOUT stopping
+    /// recording — used to run live partial transcriptions while the user is still
+    /// holding the push-to-talk key.
+    /// </summary>
+    public float[] SnapshotSamples()
+    {
+        byte[] capturedBytes;
+        lock (_bufferLock)
+        {
+            capturedBytes = _capturedPcm16Bytes.ToArray();
+        }
+
+        return AudioConversion.Pcm16BytesToFloatSamples(capturedBytes, capturedBytes.Length);
+    }
+
+    /// <summary>
     /// Stops recording and returns the full utterance as 16 kHz mono float samples
     /// ready for Whisper. Returns an empty array if nothing meaningful was captured.
     /// </summary>
