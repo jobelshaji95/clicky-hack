@@ -16,6 +16,7 @@ public sealed class AppConfig
     public TtsConfig Tts { get; set; } = new();
     public ModelDownloadConfig ModelDownloads { get; set; } = new();
     public OverlayConfig Overlay { get; set; } = new();
+    public AgentConfig Agent { get; set; } = new();
 
     /// <summary>Directory the executable lives in — the anchor for every relative path.</summary>
     public static string ApplicationDirectory =>
@@ -101,4 +102,17 @@ public sealed class ModelDownloadConfig
 public sealed class OverlayConfig
 {
     public bool ShowCursorByDefault { get; set; } = true;
+}
+
+public sealed class AgentConfig
+{
+    /// <summary>
+    /// Agent Mode lets Clicky actually click and type to carry out a spoken task.
+    /// Off by default — it controls the real mouse/keyboard, so the user opts in
+    /// explicitly in appsettings.json before it will do anything.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Hard cap on autonomous actions per task, so a confused agent can't run away.</summary>
+    public int MaxSteps { get; set; } = 6;
 }

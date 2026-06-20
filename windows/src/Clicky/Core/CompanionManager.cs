@@ -322,6 +322,17 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
 
                 LastTranscript = transcript;
 
+                // Agent Mode (opt-in): "agent, <task>" hands control to the autonomous
+                // click/type loop instead of giving a spoken-style answer.
+                if (_config.Agent.Enabled && TryGetAgentTask(transcript, out var agentTask))
+                {
+                    ClickyLog.Info("Pipeline", $"Routing to Agent Mode: \"{agentTask}\"");
+                    interaction.Response = $"[agent] {agentTask}";
+                    SetVoiceStateOnUi(CompanionVoiceState.Responding);
+                    await RunAgentModeAsync(agentTask, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
                 var screenCaptures = await _screenCapture.CaptureAllScreensAsJpegAsync().ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 ClickyLog.Info("Pipeline", $"Captured {screenCaptures.Count} screen(s).");
@@ -471,6 +482,130 @@ public sealed class CompanionManager : INotifyPropertyChanged, IDisposable
         var pointingPhrase = PointingPhrases[PointingPhraseRandom.Next(PointingPhrases.Length)];
         SetVoiceStateOnUi(CompanionVoiceState.Idle);
         _overlayManager.PointTo(target, pointingPhrase, onArrived: () => { /* returns to cursor-follow automatically */ });
+    }
+
+    // ── Agent Mode ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Detects an "agent" trigger at the start of the transcript and extracts the task.
+    /// Triggers: "agent ...", "clicky agent ...", "hey clicky agent ...".
+    /// </summary>
+    private static bool TryGetAgentTask(string transcript, out string task)
+    {
+        task = string.Empty;
+        var lowered = transcript.TrimStart().ToLowerInvariant();
+
+        // Longest triggers first so "clicky agent" isn't shadowed by "agent".
+        string[] triggers = { "hey clicky agent", "clicky agent", "agent" };
+        foreach (var trigger in triggers)
+        {
+            if (lowered == trigger || lowered.StartsWith(trigger + " ", StringComparison.Ordinal))
+            {
+                var triggerIndex = transcript.ToLowerInvariant().IndexOf(trigger, StringComparison.Ordinal);
+                task = transcript[(triggerIndex + trigger.Length)..].TrimStart(' ', ',', ':', '.').Trim();
+                return !string.IsNullOrWhiteSpace(task);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The autonomous loop: screenshot → ask the model for one next action → execute it
+    /// → repeat, up to MaxSteps, until the model says done. Every step is narrated in the
+    /// response card and written to the log. Hard-capped and opt-in for safety.
+    /// </summary>
+    private async Task RunAgentModeAsync(string task, CancellationToken cancellationToken)
+    {
+        ClickyLog.Info("Agent", $"Start — task=\"{task}\", maxSteps={_config.Agent.MaxSteps}.");
+        _overlayManager.UpdateResponse($"agent mode: {task}", isStreaming: false);
+
+        var actionsTaken = new List<string>();
+
+        for (var step = 1; step <= _config.Agent.MaxSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var screenCaptures = await _screenCapture.CaptureAllScreensAsJpegAsync().ConfigureAwait(false);
+            var monitor = screenCaptures.FirstOrDefault(capture => capture.IsCursorScreen)
+                          ?? screenCaptures.FirstOrDefault();
+            if (monitor is null)
+            {
+                break;
+            }
+
+            var labeledImages = new List<LabeledImage>
+            {
+                new(monitor.ImageData,
+                    $"current screen (image dimensions: {monitor.ScreenshotWidthInPixels}x{monitor.ScreenshotHeightInPixels} pixels)")
+            };
+
+            var historyText = actionsTaken.Count == 0
+                ? "(none yet)"
+                : string.Join("\n", actionsTaken.Select((entry, index) => $"{index + 1}. {entry}"));
+            var userPrompt = $"task: {task}\n\nactions taken so far:\n{historyText}\n\nwhat is the single next action?";
+
+            var response = await _visionLlm.AnalyzeImagesStreamingAsync(
+                labeledImages,
+                SystemPrompts.AgentNextAction,
+                Array.Empty<ConversationExchange>(),
+                userPrompt,
+                onTextChunk: _ => { },
+                cancellationToken).ConfigureAwait(false);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var action = AgentActionParser.Parse(response);
+            ClickyLog.Info("Agent", $"Step {step}/{_config.Agent.MaxSteps}: {action.Summary} | {action.Narration}");
+
+            if (!string.IsNullOrWhiteSpace(action.Narration))
+            {
+                _overlayManager.UpdateResponse($"agent: {action.Narration}", isStreaming: false);
+            }
+
+            if (action.Kind is AgentActionKind.Done or AgentActionKind.Unknown)
+            {
+                actionsTaken.Add(action.Summary);
+                break;
+            }
+
+            ExecuteAgentAction(action, monitor);
+            actionsTaken.Add(action.Summary);
+
+            // Let the UI react before grabbing the next screenshot.
+            await Task.Delay(900, cancellationToken).ConfigureAwait(false);
+        }
+
+        ClickyLog.Info("Agent", $"Finished after {actionsTaken.Count} action(s).");
+
+        // Hold the final narration briefly so the user can read it.
+        await Task.Delay(2500, cancellationToken).ConfigureAwait(false);
+        _overlayManager.HideResponse();
+    }
+
+    private static void ExecuteAgentAction(AgentAction action, MonitorScreenCapture monitor)
+    {
+        switch (action.Kind)
+        {
+            case AgentActionKind.Click when action.X is { } x && action.Y is { } y:
+            {
+                var target = CoordinateMapper.MapScreenshotPointToDesktop(x, y, monitor);
+                // Snap to the real control just like normal pointing.
+                var refined = ElementGrounding.RefineToElementCenter(target.GlobalDeviceX, target.GlobalDeviceY);
+                var deviceX = (int)Math.Round(refined?.X ?? target.GlobalDeviceX);
+                var deviceY = (int)Math.Round(refined?.Y ?? target.GlobalDeviceY);
+                InputSynthesizer.ClickAt(deviceX, deviceY);
+                break;
+            }
+
+            case AgentActionKind.Type when !string.IsNullOrEmpty(action.Text):
+                InputSynthesizer.TypeText(action.Text);
+                break;
+
+            case AgentActionKind.Key when !string.IsNullOrWhiteSpace(action.Text):
+                InputSynthesizer.PressKey(action.Text!);
+                break;
+        }
     }
 
     // ── Live partial transcription ───────────────────────────────────────

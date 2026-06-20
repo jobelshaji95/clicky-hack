@@ -65,6 +65,18 @@ Copy-Item stage\models $out -Recurse -Force
 > vision inference. The bundled llama.cpp is a **Vulkan** build, so it accelerates
 > on any modern NVIDIA/AMD/Intel GPU without a CUDA toolkit. CPU works but is slower.
 
+## Agent Mode (opt-in)
+
+Clicky can optionally *act* — clicking and typing to carry out a spoken task — not
+just point. It's **off by default** because it drives the real mouse and keyboard.
+To enable it, set `"Agent": { "Enabled": true }` in `appsettings.json`, then say
+**"agent, &lt;task&gt;"** (e.g. "agent, open notepad and type a reminder").
+
+Guardrails: it's capped at `MaxSteps` actions per task, narrates each step in the
+response card, logs every action, and is prompted to refuse destructive or sensitive
+steps (deleting, sending, purchasing, passwords) — stopping and asking you to do those
+yourself.
+
 ## Logs & history (debugging)
 
 Everything is written under `%LOCALAPPDATA%\Clicky` (open it from the tray menu →
