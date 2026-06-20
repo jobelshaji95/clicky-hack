@@ -50,6 +50,18 @@ public partial class App : Application
         _companionManager = new CompanionManager(_config);
         _trayIconManager = new TrayIconManager(_companionManager);
         _companionManager.Start();
+
+        // Best-effort, non-blocking update check (the only network call; fails silently).
+        _ = CheckForUpdatesAsync();
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        var update = await UpdateChecker.CheckForUpdateAsync();
+        if (update is { } updateInfo && _trayIconManager is not null)
+        {
+            Dispatcher.Invoke(() => _trayIconManager.NotifyUpdateAvailable(updateInfo.LatestVersion, updateInfo.ReleaseUrl));
+        }
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs args)

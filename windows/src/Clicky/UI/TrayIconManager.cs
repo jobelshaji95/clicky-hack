@@ -17,6 +17,7 @@ public sealed class TrayIconManager : IDisposable
     private readonly CompanionManager _companionManager;
     private readonly TaskbarIcon _taskbarIcon;
     private PanelWindow? _panelWindow;
+    private string? _updateUrl;
 
     public TrayIconManager(CompanionManager companionManager)
     {
@@ -31,6 +32,36 @@ public sealed class TrayIconManager : IDisposable
         // Left-click toggles the panel; right-click shows a minimal menu.
         _taskbarIcon.TrayLeftMouseUp += (_, _) => TogglePanel();
         _taskbarIcon.ContextMenu = BuildContextMenu();
+
+        // Clicking the update balloon opens the releases page.
+        _taskbarIcon.TrayBalloonTipClicked += (_, _) => OpenUpdatePage();
+    }
+
+    /// <summary>Shows a tray balloon when a newer version is available (informational only).</summary>
+    public void NotifyUpdateAvailable(string version, string releaseUrl)
+    {
+        _updateUrl = releaseUrl;
+        _taskbarIcon.ShowBalloonTip(
+            "Clicky update available",
+            $"Version {version} is out — click to view the release.",
+            BalloonIcon.Info);
+    }
+
+    private void OpenUpdatePage()
+    {
+        if (string.IsNullOrEmpty(_updateUrl))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = _updateUrl, UseShellExecute = true });
+        }
+        catch
+        {
+            // Best-effort.
+        }
     }
 
     private static System.Drawing.Icon LoadTrayIcon()
